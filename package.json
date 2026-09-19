@@ -9,6 +9,7 @@
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "node scripts/test.mjs",
     "test:live": "node scripts/live-network-smoke.mjs",
+    "preview": "node scripts/serve-preview.mjs",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {

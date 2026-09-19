@@ -28,6 +28,9 @@ npm run check
 Load `dist/chromium` as an unpacked Chromium extension or
 `dist/firefox` as a temporary Firefox add-on.
 
+For the complete copy-pasteable local browser handoff, see
+[docs/LOCAL-TESTING.md](docs/LOCAL-TESTING.md).
+
 The default tests are fully mocked and do not require network access. To opt
 into a read-only smoke test against the configured ECX Alpha explorer, run:
 
