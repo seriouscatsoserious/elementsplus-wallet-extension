@@ -29,13 +29,17 @@ class MemoryStorage implements ExtensionStorageArea {
 
 class FakeSession implements LwkWalletSession {
   destroyed = 0;
+  prepareCalls = 0;
+  signCalls = 0;
+  lastSigned: PreparedTransaction | undefined;
   async sync(_signal: AbortSignal) {
     return {
       chain: {
         genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
         nativeAssetId: ECX_ALPHA_IDENTITY.nativeAssetId,
-        headerChainVerified: true as const,
-        explicitOutputsOnly: true as const,
+        backend: "explorer" as const,
+        headerChainVerified: false as const,
+        transactionPolicy: "explicit-only" as const,
       },
       tipHeight: 1,
       tipHash: "0".repeat(64),
@@ -51,11 +55,33 @@ class FakeSession implements LwkWalletSession {
       syncedAt: "2026-09-19T12:00:00.000Z",
     };
   }
-  async prepareTransfer(_draft: TransferDraft): Promise<PreparedTransaction> { throw new Error("not used"); }
+  async prepareTransfer(draft: TransferDraft): Promise<PreparedTransaction> {
+    this.prepareCalls += 1;
+    return {
+      pset: "cHNldP8=",
+      coreReviewHash: "2".repeat(64),
+      summary: {
+        kind: "transfer",
+        networkKey: ECX_ALPHA_IDENTITY.key,
+        genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
+        assetId: draft.assetId,
+        destination: draft.destination,
+        amountAtomic: draft.amountAtomic,
+        networkFeeAssetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+        networkFeeAtomic: "100",
+        feeRate: draft.feeRate,
+        transactionPolicy: "explicit-only",
+      },
+    };
+  }
   async prepareIssue(_draft: IssueDraft): Promise<PreparedTransaction> { throw new Error("not used"); }
   async prepareReissue(_draft: ReissueDraft): Promise<PreparedTransaction> { throw new Error("not used"); }
   async prepareBurn(_draft: BurnDraft): Promise<PreparedTransaction> { throw new Error("not used"); }
-  async signAndBroadcast(_transaction: PreparedTransaction): Promise<string> { throw new Error("not used"); }
+  async signAndBroadcast(transaction: PreparedTransaction): Promise<string> {
+    this.signCalls += 1;
+    this.lastSigned = transaction;
+    return "1".repeat(64);
+  }
   destroy(): void { this.destroyed += 1; }
 }
 
@@ -97,6 +123,54 @@ class HangingAdapter extends FakeAdapter {
   override readonly session = new HangingSession();
 }
 
+class MismatchedSummarySession extends FakeSession {
+  override async prepareTransfer(draft: TransferDraft): Promise<PreparedTransaction> {
+    const prepared = await super.prepareTransfer(draft);
+    return {
+      ...prepared,
+      summary: { ...prepared.summary, amountAtomic: (BigInt(draft.amountAtomic) + 1n).toString() },
+    };
+  }
+}
+
+class MismatchedSummaryAdapter extends FakeAdapter {
+  override readonly session = new MismatchedSummarySession();
+}
+
+class ZeroFeeSummarySession extends FakeSession {
+  override async prepareTransfer(draft: TransferDraft): Promise<PreparedTransaction> {
+    const prepared = await super.prepareTransfer(draft);
+    return {
+      ...prepared,
+      summary: { ...prepared.summary, networkFeeAtomic: "0" },
+    };
+  }
+}
+
+class ZeroFeeSummaryAdapter extends FakeAdapter {
+  override readonly session = new ZeroFeeSummarySession();
+}
+
+class BindingVariantSession extends FakeSession {
+  constructor(
+    private readonly pset: string,
+    private readonly coreReviewHash: string,
+  ) { super(); }
+
+  override async prepareTransfer(draft: TransferDraft): Promise<PreparedTransaction> {
+    const prepared = await super.prepareTransfer(draft);
+    return { ...prepared, pset: this.pset, coreReviewHash: this.coreReviewHash };
+  }
+}
+
+class BindingVariantAdapter extends FakeAdapter {
+  override readonly session: BindingVariantSession;
+  constructor(pset: string, coreReviewHash: string) {
+    super();
+    this.session = new BindingVariantSession(pset, coreReviewHash);
+  }
+}
+
 const payload: WalletVaultPayload = {
   schemaVersion: 1,
   walletId: "abcdefghijklmnopqrstuv",
@@ -106,6 +180,29 @@ const payload: WalletVaultPayload = {
   genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
   explicitOutputsOnly: true,
 };
+
+const TEST_RECEIVE_ADDRESS = "elements1qw508d6qejxtdg4y5r3zarvary0c5xw7kfmp4zh";
+
+async function unlockedController(
+  adapter: FakeAdapter = new FakeAdapter(),
+  options: { readonly now?: () => Date; readonly approvalTimeoutMilliseconds?: number } = {},
+): Promise<{ readonly controller: WalletController; readonly adapter: FakeAdapter }> {
+  const store = new VaultStore(new MemoryStorage());
+  await store.write(await encryptVault(payload, "a sufficiently long password"));
+  const controller = new WalletController({
+    vaultStore: store,
+    adapter,
+    ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.approvalTimeoutMilliseconds === undefined
+      ? {}
+      : { approvalTimeoutMilliseconds: options.approvalTimeoutMilliseconds }),
+  });
+  assert.equal((await controller.handle({
+    type: "wallet.unlock",
+    password: "a sufficiently long password",
+  })).ok, true);
+  return { controller, adapter };
+}
 
 describe("wallet controller", () => {
   it("rejects surplus message fields", async () => {
@@ -166,6 +263,161 @@ describe("wallet controller", () => {
       }),
       /native-asset marker/u,
     );
+    await assert.rejects(
+      async () => validateWalletSnapshot({
+        ...snapshot,
+        chain: { ...snapshot.chain, headerChainVerified: true },
+      }),
+      /trust metadata/u,
+    );
+  });
+
+  it("keeps a prepared PSET in the controller and broadcasts it only after bound approval", async () => {
+    const { controller, adapter } = await unlockedController();
+    const prepared = await controller.handle({
+      type: "transaction.prepare-send",
+      assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+      destination: TEST_RECEIVE_ADDRESS,
+      amountAtomic: "500",
+      feeRate: "1.25",
+    });
+    assert.equal(prepared.ok, true);
+    if (!prepared.ok) return;
+    assert.equal(Object.hasOwn(prepared.result, "pset"), false);
+    assert.equal(prepared.result.summary.amountAtomic, "500");
+    assert.match(prepared.result.approvalToken, /^[A-Za-z0-9_-]{43}$/u);
+    assert.match(prepared.result.summaryHash, /^[0-9a-f]{64}$/u);
+
+    const broadcast = await controller.handle({
+      type: "transaction.approve-and-broadcast",
+      approvalToken: prepared.result.approvalToken,
+      summaryHash: prepared.result.summaryHash,
+    });
+    assert.deepEqual(broadcast, { ok: true, result: { txid: "1".repeat(64) } });
+    assert.equal(adapter.session.signCalls, 1);
+    assert.equal(adapter.session.lastSigned?.pset, "cHNldP8=");
+    assert.equal(adapter.session.lastSigned?.coreReviewHash, "2".repeat(64));
+
+    const replay = await controller.handle({
+      type: "transaction.approve-and-broadcast",
+      approvalToken: prepared.result.approvalToken,
+      summaryHash: prepared.result.summaryHash,
+    });
+    assert.equal(replay.ok, false);
+    assert.equal(adapter.session.signCalls, 1);
+    assert.equal((await controller.handle({ type: "wallet.lock" })).ok, true);
+  });
+
+  it("binds both the exact PSET bytes and Rust core review commitment into approval", async () => {
+    const request = {
+      type: "transaction.prepare-send",
+      assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+      destination: TEST_RECEIVE_ADDRESS,
+      amountAtomic: "500",
+      feeRate: "1",
+    } as const;
+    const first = await unlockedController(new BindingVariantAdapter("cHNldP8=", "2".repeat(64)));
+    const changedPset = await unlockedController(new BindingVariantAdapter("cHNldP8A", "2".repeat(64)));
+    const changedCoreReview = await unlockedController(new BindingVariantAdapter("cHNldP8=", "3".repeat(64)));
+    const approvals = await Promise.all([
+      first.controller.handle(request),
+      changedPset.controller.handle(request),
+      changedCoreReview.controller.handle(request),
+    ]);
+    for (const approval of approvals) assert.equal(approval.ok, true);
+    const [baseApproval, psetApproval, coreReviewApproval] = approvals;
+    if (!baseApproval?.ok || !psetApproval?.ok || !coreReviewApproval?.ok) return;
+    assert.notEqual(baseApproval.result.summaryHash, psetApproval.result.summaryHash);
+    assert.notEqual(baseApproval.result.summaryHash, coreReviewApproval.result.summaryHash);
+    await Promise.all([
+      first.controller.handle({ type: "wallet.lock" }),
+      changedPset.controller.handle({ type: "wallet.lock" }),
+      changedCoreReview.controller.handle({ type: "wallet.lock" }),
+    ]);
+  });
+
+  it("consumes a pending approval when its bound summary hash does not match", async () => {
+    const { controller, adapter } = await unlockedController();
+    const prepared = await controller.handle({
+      type: "transaction.prepare-send",
+      assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+      destination: TEST_RECEIVE_ADDRESS,
+      amountAtomic: "500",
+      feeRate: "1",
+    });
+    assert.equal(prepared.ok, true);
+    if (!prepared.ok) return;
+    const mismatch = await controller.handle({
+      type: "transaction.approve-and-broadcast",
+      approvalToken: prepared.result.approvalToken,
+      summaryHash: "f".repeat(64),
+    });
+    assert.equal(mismatch.ok, false);
+    const retry = await controller.handle({
+      type: "transaction.approve-and-broadcast",
+      approvalToken: prepared.result.approvalToken,
+      summaryHash: prepared.result.summaryHash,
+    });
+    assert.equal(retry.ok, false);
+    assert.equal(adapter.session.signCalls, 0);
+    assert.equal((await controller.handle({ type: "wallet.lock" })).ok, true);
+  });
+
+  it("expires prepared approvals without signing", async () => {
+    let now = Date.parse("2026-09-19T12:00:00.000Z");
+    const { controller, adapter } = await unlockedController(new FakeAdapter(), {
+      now: () => new Date(now),
+      approvalTimeoutMilliseconds: 1_000,
+    });
+    const prepared = await controller.handle({
+      type: "transaction.prepare-send",
+      assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+      destination: TEST_RECEIVE_ADDRESS,
+      amountAtomic: "500",
+      feeRate: "1",
+    });
+    assert.equal(prepared.ok, true);
+    if (!prepared.ok) return;
+    now += 1_001;
+    const response = await controller.handle({
+      type: "transaction.approve-and-broadcast",
+      approvalToken: prepared.result.approvalToken,
+      summaryHash: prepared.result.summaryHash,
+    });
+    assert.equal(response.ok, false);
+    assert.equal(adapter.session.signCalls, 0);
+    assert.equal((await controller.handle({ type: "wallet.lock" })).ok, true);
+  });
+
+  it("rejects an adapter PSET summary that does not match the requested transfer", async () => {
+    const adapter = new MismatchedSummaryAdapter();
+    const { controller } = await unlockedController(adapter);
+    const response = await controller.handle({
+      type: "transaction.prepare-send",
+      assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+      destination: TEST_RECEIVE_ADDRESS,
+      amountAtomic: "500",
+      feeRate: "1",
+    });
+    assert.equal(response.ok, false);
+    if (!response.ok) assert.match(response.error.message, /does not match/u);
+    assert.equal(adapter.session.signCalls, 0);
+    assert.equal((await controller.handle({ type: "wallet.lock" })).ok, true);
+  });
+
+  it("rejects an adapter PSET summary with a zero network fee", async () => {
+    const { controller, adapter } = await unlockedController(new ZeroFeeSummaryAdapter());
+    const response = await controller.handle({
+      type: "transaction.prepare-send",
+      assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+      destination: TEST_RECEIVE_ADDRESS,
+      amountAtomic: "500",
+      feeRate: "1",
+    });
+    assert.equal(response.ok, false);
+    if (!response.ok) assert.equal(response.error.code, "INVALID_REQUEST");
+    assert.equal(adapter.session.signCalls, 0);
+    assert.equal((await controller.handle({ type: "wallet.lock" })).ok, true);
   });
 
   it("aborts a hung adapter sync so lock requests cannot be blocked forever", async () => {

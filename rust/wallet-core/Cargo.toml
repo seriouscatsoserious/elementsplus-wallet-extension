@@ -1,0 +1,33 @@
+[package]
+name = "elementsplus-wallet-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Minimal fail-closed ECX Alpha browser-wallet signing core"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+bech32 = "=0.11.0"
+elements = { version = "=0.25.3", features = ["serde"] }
+elements-miniscript = "=0.4.0"
+elementsplus-lwk-adapter = { path = "../lwk-adapter" }
+hex = "=0.4.3"
+lwk_common = { git = "https://github.com/blockstream/lwk.git", rev = "55671e82c0cc713ece341f74704ff39255c633ec" }
+lwk_signer = { git = "https://github.com/blockstream/lwk.git", rev = "55671e82c0cc713ece341f74704ff39255c633ec", default-features = false }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+thiserror = "=2.0.18"
+wasm-bindgen = { version = "=0.2.108", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "=0.2.17", features = ["js"] }
+
+[patch.crates-io]
+lwk_common = { git = "https://github.com/blockstream/lwk.git", rev = "55671e82c0cc713ece341f74704ff39255c633ec" }

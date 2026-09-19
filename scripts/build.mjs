@@ -74,6 +74,7 @@ for (const target of ["chromium", "firefox"]) {
   const targetDirectory = path.join(outputDirectory, target);
   await mkdir(targetDirectory, { recursive: true });
   await copyTree(path.join(buildDirectory, "src"), path.join(targetDirectory, "src"));
+  await copyTree(path.join(root, ".wasm-bindgen"), path.join(targetDirectory, "src", "wasm"));
   await copyStatic(path.join(root, "src"), path.join(targetDirectory, "src"));
   await writePreview(targetDirectory);
   const manifest = JSON.parse(await readFile(path.join(root, "manifest", `${target}.json`), "utf8"));

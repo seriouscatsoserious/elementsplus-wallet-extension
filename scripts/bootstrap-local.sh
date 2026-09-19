@@ -13,6 +13,23 @@ if [ "$node_major" -lt "$required_major" ]; then
   exit 1
 fi
 
+for required_command in cargo rustup wasm-bindgen; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    echo "$required_command is required; see docs/LOCAL-TESTING.md." >&2
+    exit 1
+  fi
+done
+
+if [ "$(wasm-bindgen --version)" != "wasm-bindgen 0.2.108" ]; then
+  echo "wasm-bindgen-cli 0.2.108 is required; found $(wasm-bindgen --version)." >&2
+  exit 1
+fi
+
+if ! rustup target list --installed | grep -qx 'wasm32-unknown-unknown'; then
+  echo "The wasm32-unknown-unknown Rust target is required; see docs/LOCAL-TESTING.md." >&2
+  exit 1
+fi
+
 npm ci --ignore-scripts
 npm run check
 

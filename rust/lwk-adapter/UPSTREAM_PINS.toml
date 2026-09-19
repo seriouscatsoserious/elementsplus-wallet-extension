@@ -1,0 +1,35 @@
+# Every upstream input is immutable. Update this file only together with the
+# live-header fixtures, compatibility audit, and a full test run.
+
+[lwk]
+repository = "https://github.com/blockstream/lwk"
+revision = "55671e82c0cc713ece341f74704ff39255c633ec"
+rust_toolchain = "1.85.0"
+elements_crate = "0.25.3"
+
+[elements_plus]
+repository = "https://github.com/ekulkisnek/liquid-drivechain-signet-adaptation"
+release_tag = "elements-alpha-cad1fc1fb-desktop-r2"
+revision = "b2b928fd65e02901d8a98ee38adfe35dfb0f379f"
+explicit_only_height = 84
+current_master_observed = "4041a8ba5d9c0870dbe22c188bce28410c10348a"
+current_master_confidential_payments = true
+live_validator_revision = "unconfirmed"
+
+[live_service]
+explorer_api = "https://explorer.bitnames.info/api"
+seed_peer_as_supplied = "163.192.123.236:39444"
+observed_tip_height = 223
+observed_tip_hash = "c34d7de42dc2aa0e92271b927146cf1f641ec7ec8dd8175233dbccb9a4a99d98"
+observed_at = "2026-09-19T04:57:11+02:00"
+
+[identity]
+sidechain_slot = 24
+genesis_hash = "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd"
+parent_genesis_hash = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
+policy_asset = "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4"
+native_bech32_hrp = "elements"
+native_blech32_hrp = "elementsl"
+native_p2pkh_prefix = 68
+native_p2sh_prefix = 13
+native_blinded_prefix = 6

@@ -24,8 +24,13 @@ export interface WalletSnapshot {
   readonly chain: {
     readonly genesisHash: string;
     readonly nativeAssetId: string;
-    readonly headerChainVerified: true;
-    readonly explicitOutputsOnly: true;
+    /**
+     * An explorer-backed wallet trusts the configured backend for chain data.
+     * It does not independently validate header continuity or proof of work.
+     */
+    readonly backend: "explorer";
+    readonly headerChainVerified: false;
+    readonly transactionPolicy: "explicit-only";
   };
   readonly tipHeight: number;
   readonly tipHash: string;
@@ -63,9 +68,33 @@ export interface BurnDraft {
   readonly explicitOutputsOnly: true;
 }
 
+export interface TransferSummary {
+  readonly kind: "transfer";
+  readonly networkKey: string;
+  readonly genesisHash: string;
+  readonly assetId: string;
+  readonly destination: string;
+  readonly amountAtomic: string;
+  readonly networkFeeAssetId: string;
+  readonly networkFeeAtomic: string;
+  readonly feeRate: string;
+  readonly transactionPolicy: "explicit-only";
+}
+
 export interface PreparedTransaction {
+  /** Canonical base64 PSET. This remains inside the background controller. */
   readonly pset: string;
-  readonly summaryHash: string;
+  /**
+   * Domain-separated commitment recomputed by the local Rust core from the
+   * exact serialized PSET. The controller binds this value into its one-time
+   * approval and the core requires it again before signing.
+   */
+  readonly coreReviewHash: string;
+  /**
+   * Adapter-derived review data for the exact PSET above. The adapter must
+   * reject omitted external outputs or any PSET/summary disagreement.
+   */
+  readonly summary: TransferSummary;
 }
 
 export interface LwkWalletSession {

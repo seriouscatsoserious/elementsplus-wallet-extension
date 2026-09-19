@@ -37,9 +37,9 @@
           </section>
 
           <div class="quick-actions" aria-label="Wallet actions">
-            <button type="button" data-view-link="send" data-wallet-action disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 17 10-10M8 7h9v9"/></svg></span><span>Send</span></button>
-            <button type="button" data-view-link="receive" data-wallet-action disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 7-10 10M16 17H7V8"/></svg></span><span>Receive</span></button>
-            <button type="button" data-view-link="issue" data-wallet-action disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span>Issue</span></button>
+            <button type="button" data-view-link="send" data-wallet-action="send" disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 17 10-10M8 7h9v9"/></svg></span><span>Send</span></button>
+            <button type="button" data-view-link="receive" data-wallet-action="receive" disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 7-10 10M16 17H7V8"/></svg></span><span>Receive</span></button>
+            <button type="button" data-view-link="issue" data-wallet-action="issue" disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span>Issue</span></button>
             <button type="button" data-view-link="manage"><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/></svg></span><span>More</span></button>
           </div>
 
@@ -97,17 +97,49 @@
 
         <section class="screen" data-view="send" hidden>
           <header class="view-header"><button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Send</h1><p>ECX Alpha transfer</p></div><span></span></header>
-          <p class="warning-banner">Signing is disabled until the reviewed LWK adapter is installed.</p>
+          <p id="send-capability-status" class="warning-banner">Signing is disabled until the reviewed wallet engine is available and unlocked.</p>
           <form id="send-form" class="flow-form">
             <fieldset disabled data-chain-fieldset>
-              <label>Recipient<input name="destination" autocomplete="off" spellcheck="false" placeholder="Paste ECX Alpha address"></label>
-              <label>Asset<select name="asset"><option>ECX — native asset</option></select></label>
-              <section class="amount-entry"><div><label for="send-amount">Amount</label><button type="button" disabled>Max</button></div><div><input id="send-amount" name="amount" inputmode="numeric" pattern="[0-9]+" placeholder="0"><strong>ECX</strong></div><small>Available —</small></section>
-              <label>Fee rate<input name="fee-rate" inputmode="decimal" placeholder="Automatic"></label>
-              <label>Output privacy<select name="privacy"><option>Explicit / non-confidential</option></select></label>
-              <button class="primary-button sticky-action" type="submit">Review transaction</button>
+              <label>Recipient<input name="destination" required maxlength="1000" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste explicit ECX Alpha address"></label>
+              <label>Asset<select name="asset" disabled><option value="native">ECX — native asset only</option></select></label>
+              <section class="amount-entry"><div><label for="send-amount">Amount (atomic units)</label></div><div><input id="send-amount" name="amount" required maxlength="20" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="0"><strong>atomic</strong></div><small id="send-available">Available —</small></section>
+              <label>Fee rate <small>Positive atomic units per vbyte</small><input name="fee-rate" required maxlength="32" inputmode="decimal" value="1" pattern="(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{0,7}[1-9])?"></label>
+              <label>Output policy<select name="privacy" disabled><option value="explicit">Explicit / non-confidential only</option></select></label>
+              <button id="review-transaction" class="primary-button sticky-action" type="submit">Review exact transaction</button>
             </fieldset>
+            <p id="send-status" class="inline-status" role="status" aria-live="polite"></p>
           </form>
+        </section>
+
+        <section class="screen" data-view="review" hidden>
+          <header class="view-header"><button id="edit-transaction" type="button" class="back-button" data-view-link="send" aria-label="Edit transaction"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Review transfer</h1><p>Verify every value before signing</p></div><span></span></header>
+          <p class="warning-banner">Approval signs and broadcasts this exact transfer. The one-time approval cannot be replayed.</p>
+          <dl class="review-list">
+            <div><dt>Destination</dt><dd id="review-destination" class="mono-value">—</dd></div>
+            <div><dt>Amount</dt><dd id="review-amount">—</dd></div>
+            <div><dt>Asset ID</dt><dd id="review-asset" class="mono-value">—</dd></div>
+            <div><dt>Network fee</dt><dd id="review-fee">—</dd></div>
+            <div><dt>Fee asset ID</dt><dd id="review-fee-asset" class="mono-value">—</dd></div>
+            <div><dt>Requested fee rate</dt><dd id="review-fee-rate">—</dd></div>
+            <div><dt>Output policy</dt><dd id="review-policy">—</dd></div>
+            <div><dt>Approval expires</dt><dd id="review-expiry">—</dd></div>
+            <div><dt>Summary hash</dt><dd id="review-summary-hash" class="mono-value">—</dd></div>
+          </dl>
+          <p id="approval-status" class="inline-status review-status" role="status" aria-live="assertive">No transaction is awaiting approval.</p>
+          <button id="approve-broadcast" class="primary-button sticky-action" type="button" disabled>Approve &amp; Broadcast</button>
+          <button id="cancel-review" class="secondary-button sticky-action" type="button" data-view-link="send">Edit instead</button>
+        </section>
+
+        <section class="screen" data-view="sent" hidden>
+          <header class="view-header"><button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Broadcast submitted</h1><p>Explorer-backed ECX Alpha</p></div><span></span></header>
+          <section class="broadcast-result">
+            <span class="result-mark" aria-hidden="true">✓</span>
+            <strong>Transaction submitted</strong>
+            <p>The wallet returned this transaction ID. Confirmation remains subject to the network and explorer.</p>
+            <div><span>Transaction ID</span><output id="broadcast-txid" class="mono-value">—</output></div>
+          </section>
+          <p id="post-broadcast-status" class="inline-status review-status" role="status" aria-live="polite"></p>
+          <button class="primary-button sticky-action" type="button" data-view-link="dashboard">Return to wallet</button>
         </section>
 
         <section class="screen" data-view="receive" hidden>
@@ -116,7 +148,8 @@
           <div class="qr-card" aria-label="QR code unavailable"><div class="qr-grid" aria-hidden="true"><i></i><i></i><i></i><i></i><b>E+</b><i></i><i></i><i></i><i></i></div><span>QR code unavailable</span></div>
           <div class="receive-account"><strong>ECX Alpha account</strong><small>Explicit address · sidechain slot 24</small></div>
           <div id="receive-address" class="address-box">—</div>
-          <div class="two-actions"><button type="button" class="primary-button" disabled data-wallet-action>Copy address</button><button type="button" class="secondary-button" disabled data-wallet-action>New address</button></div>
+          <div class="two-actions"><button id="copy-receive-address" type="button" class="primary-button" disabled data-wallet-action="receive">Copy address</button><button id="new-receive-address" type="button" class="secondary-button" disabled>New address</button></div>
+          <p id="receive-status" class="inline-status review-status" role="status" aria-live="polite">Address rotation is not supported in this build.</p>
         </section>
 
         <section class="screen" data-view="issue" hidden>
@@ -138,7 +171,7 @@
 
         <section class="screen" data-view="manage" hidden>
           <header class="view-header"><button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Asset tools</h1><p>Issue, reissue, or burn</p></div><span></span></header>
-          <button class="tool-card" type="button" data-view-link="issue"><span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span><strong>Create an asset</strong><small>Define a new asset and its initial supply</small></span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+          <button class="tool-card" type="button" data-view-link="issue" data-wallet-action="issue" disabled><span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span><strong>Create an asset</strong><small>Requires an adapter with reviewed issuance support</small></span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
           <fieldset class="tool-card form-tool" disabled data-chain-fieldset><span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v6h-6"/></svg></span><span><strong>Reissue an asset</strong><small>Requires a spendable reissuance token</small></span><select aria-label="Asset to reissue"><option>No verified tokens</option></select><input inputmode="numeric" placeholder="Amount" aria-label="Reissuance amount"><input placeholder="Destination" aria-label="Reissuance destination"><button class="secondary-button" type="button">Review reissuance</button></fieldset>
           <fieldset class="tool-card form-tool danger-tool" disabled data-chain-fieldset><span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></span><span><strong>Burn an asset</strong><small>Permanently destroy an exact asset amount</small></span><select aria-label="Asset to burn"><option>No verified assets</option></select><input inputmode="numeric" placeholder="Amount" aria-label="Burn amount"><button class="danger-button" type="button">Review burn</button></fieldset>
         </section>

@@ -1,7 +1,12 @@
-import { UnavailableLwkAdapter } from "../adapters/lwk.js";
+import { ElementsPlusWasmAdapter } from "../adapters/elementsplus-wasm.js";
 import { WalletController } from "./controller.js";
 import { getExtensionApi, restrictStorage } from "../platform/browser.js";
 import { VaultStore } from "../vault.js";
+import initWalletCore, {
+  generate_mnemonic,
+  validate_mnemonic,
+  WasmWalletCore,
+} from "../wasm/elementsplus_wallet_core.js";
 
 const api = getExtensionApi();
 // MV3 wake-up events are delivered only to listeners registered during the
@@ -11,9 +16,15 @@ const storageReady = restrictStorage(api).then(
   () => true,
   () => false,
 );
+let walletCoreReady: Promise<void> | undefined;
+const loadWalletCore = async () => {
+  walletCoreReady ??= initWalletCore().then(() => undefined);
+  await walletCoreReady;
+  return { WasmWalletCore, generate_mnemonic, validate_mnemonic };
+};
 const controller = new WalletController({
   vaultStore: new VaultStore(api.storage.local),
-  adapter: new UnavailableLwkAdapter(),
+  adapter: new ElementsPlusWasmAdapter({ loadCore: loadWalletCore }),
 });
 
 api.runtime.onMessage.addListener((message, sender, sendResponse) => {

@@ -1,0 +1,20 @@
+[package]
+name = "elementsplus-lwk-adapter"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Pinned ECX Alpha compatibility boundary for LWK"
+publish = false
+
+[dependencies]
+bech32 = "=0.11.0"
+elements = { version = "=0.25.3", features = ["serde"] }
+lwk_common = { git = "https://github.com/blockstream/lwk.git", rev = "55671e82c0cc713ece341f74704ff39255c633ec" }
+thiserror = "=2.0.18"
+
+[dev-dependencies]
+elements-miniscript = "=0.4.0"
+lwk_signer = { git = "https://github.com/blockstream/lwk.git", rev = "55671e82c0cc713ece341f74704ff39255c633ec", default-features = false }
+
+[patch.crates-io]
+lwk_common = { git = "https://github.com/blockstream/lwk.git", rev = "55671e82c0cc713ece341f74704ff39255c633ec" }

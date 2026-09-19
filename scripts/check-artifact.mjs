@@ -1,12 +1,15 @@
+import { createHash } from "node:crypto";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const required = [
   "manifest.json",
   "src/background/service-worker.js",
   "src/network/ecx-alpha.js",
+  "src/wasm/elementsplus_wallet_core.js",
+  "src/wasm/elementsplus_wallet_core_bg.wasm",
   "src/ui/wallet.html",
   "src/ui/wallet.js",
   "src/ui/preview.html",
@@ -14,8 +17,8 @@ const required = [
   "src/ui/wallet.css",
 ];
 const expectedHosts = ["https://explorer.bitnames.info/*"];
-const allowedExtensions = new Set([".css", ".html", ".js", ".json"]);
-const maximumArtifactBytes = 2 * 1024 * 1024;
+const allowedExtensions = new Set([".css", ".html", ".js", ".json", ".wasm"]);
+const maximumArtifactBytes = 12 * 1024 * 1024;
 const forbiddenSource = [
   [/(?:^|[^a-z])eval\s*\(/iu, "eval"],
   [/new\s+Function\s*\(/u, "new Function"],
@@ -36,6 +39,7 @@ async function listFiles(directory) {
   return result;
 }
 
+const walletCoreDigests = [];
 for (const target of ["chromium", "firefox"]) {
   const directory = path.join(root, "dist", target);
   for (const relative of required) {
@@ -59,6 +63,7 @@ for (const target of ["chromium", "firefox"]) {
   if (
     typeof csp !== "string"
     || !csp.includes("default-src 'none'")
+    || !csp.includes("script-src 'self' 'wasm-unsafe-eval'")
     || !csp.includes("connect-src https://explorer.bitnames.info")
     || csp.includes("'unsafe-inline'")
     || csp.includes("'unsafe-eval'")
@@ -76,6 +81,72 @@ for (const target of ["chromium", "firefox"]) {
   const preview = await readFile(path.join(directory, "src", "ui", "preview.html"), "utf8");
   if (!preview.includes('src="preview.js"') || preview.includes('src="wallet.js"')) {
     throw new Error(`${target} preview is not independent from the WebExtension runtime`);
+  }
+
+  const wasmPath = path.join(directory, "src", "wasm", "elementsplus_wallet_core_bg.wasm");
+  const wasmBytes = await readFile(wasmPath);
+  if (!WebAssembly.validate(wasmBytes)) throw new Error(`${target} wallet core WASM is invalid`);
+  walletCoreDigests.push(createHash("sha256").update(wasmBytes).digest("hex"));
+  const bindings = await import(
+    `${pathToFileURL(path.join(directory, "src", "wasm", "elementsplus_wallet_core.js")).href}?${target}`
+  );
+  bindings.initSync({ module: wasmBytes });
+  const publicTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  if (!bindings.validate_mnemonic(publicTestMnemonic)) {
+    throw new Error(`${target} packaged wallet core rejected the public BIP39 test vector`);
+  }
+  let generatedMnemonic = bindings.generate_mnemonic();
+  if (
+    !bindings.validate_mnemonic(generatedMnemonic)
+    || generatedMnemonic.split(" ").length !== 12
+  ) throw new Error(`${target} packaged wallet core mnemonic generation failed`);
+  generatedMnemonic = "";
+  const core = new bindings.WasmWalletCore(publicTestMnemonic);
+  try {
+    const derived = JSON.parse(core.derive_address_json("external", 0));
+    const recipient = JSON.parse(core.derive_address_json("external", 1));
+    if (
+      derived.branch !== "external"
+      || derived.index !== 0
+      || typeof derived.native_address !== "string"
+      || !derived.native_address.startsWith("elements1")
+    ) throw new Error(`${target} packaged wallet core derivation smoke test failed`);
+    const prepared = JSON.parse(core.prepare_send_json(JSON.stringify({
+      recipient: recipient.native_address,
+      amount: 1_000,
+      fee: 400,
+      change_index: 0,
+      utxos: [{
+        txid: "1".repeat(64),
+        vout: 0,
+        value: 10_000,
+        asset_id: "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4",
+        script_pubkey_hex: derived.script_pubkey_hex,
+        branch: "external",
+        index: 0,
+      }],
+    })));
+    const signed = JSON.parse(core.sign_prepared_json(
+      JSON.stringify(prepared),
+      prepared.review_hash,
+    ));
+    if (
+      !/^[0-9a-f]{64}$/u.test(signed.txid)
+      || signed.review_hash !== prepared.review_hash
+      || !/^(?:[0-9a-f]{2})+$/u.test(signed.raw_tx_hex)
+    ) throw new Error(`${target} packaged wallet core signing smoke test failed`);
+    const verified = JSON.parse(core.verify_raw_transaction_json(JSON.stringify({
+      expectedTxid: signed.txid,
+      rawTransactionHex: signed.raw_tx_hex,
+      expectedWalletOutputs: [{ vout: 0, scriptPubKeyHex: recipient.script_pubkey_hex }],
+    })));
+    if (
+      verified.txid !== signed.txid
+      || verified.outputs?.[0]?.assetId !== "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4"
+      || verified.outputs?.[0]?.valueAtomic !== 1_000
+    ) throw new Error(`${target} packaged wallet core raw-transaction verification failed`);
+  } finally {
+    core.free();
   }
 
   let totalBytes = 0;
@@ -98,6 +169,10 @@ for (const target of ["chromium", "firefox"]) {
   if (totalBytes > maximumArtifactBytes) {
     throw new Error(`${target} artifact exceeds ${maximumArtifactBytes} bytes`);
   }
+}
+
+if (new Set(walletCoreDigests).size !== 1) {
+  throw new Error("Chromium and Firefox packages contain different wallet core WASM bytes");
 }
 
 process.stdout.write("Artifact policy checks passed\n");

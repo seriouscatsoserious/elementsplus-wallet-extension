@@ -1,11 +1,11 @@
 # Local browser testing
 
 This repository builds the ECX Alpha Elements+ wallet extension for Chromium
-and Firefox. The current milestone supports the complete extension shell,
-navigation, encrypted-vault internals, and read-only ECX Alpha identity/status
-checks. The LWK wallet adapter is not connected yet, so mnemonic generation,
-address derivation, balances, signing, broadcasting, issuance, reissuance, and
-burning remain deliberately disabled.
+and Firefox. It packages its Rust/WASM signing core locally and supports wallet
+creation/restoration, explicit address derivation, explorer-backed balance
+discovery, native-ECX transfer review, local signing, and explorer broadcast.
+Issuance, reissuance, burning, confidential outputs, and non-native sends remain
+deliberately disabled.
 
 Never import a recovery phrase that controls anything valuable.
 
@@ -13,7 +13,18 @@ Never import a recovery phrase that controls anything valuable.
 
 - Git and GitHub CLI (`gh`), authenticated to GitHub
 - Node.js 24 or newer
+- Rust/Cargo with `rustup` (the repository pins Rust 1.89.0)
+- a platform C/C++ build toolchain (`clang` is used on the tested Linux host)
+- the `wasm32-unknown-unknown` Rust target
+- `wasm-bindgen-cli` exactly 0.2.108
 - Chrome, Brave, or Edge for the first test
+
+Install the pinned WASM build prerequisites once:
+
+```sh
+rustup toolchain install 1.89.0 --profile minimal --target wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.108 --locked
+```
 
 ## Clone, test, and build
 
@@ -35,9 +46,10 @@ Set-Location elementsplus-wallet-extension
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-local.ps1
 ```
 
-The bootstrap installs locked development dependencies, runs the TypeScript
-check and all unit tests, validates the extension artifact policy, and builds
-both browser targets. It does not install the extension or handle wallet keys.
+The bootstrap installs locked Node development dependencies, runs the
+TypeScript check and all unit tests, compiles the locked Rust core, validates
+the extension artifact policy, and builds both browser targets. It does not
+install the extension or handle wallet keys.
 
 ## Load it in a Chromium browser
 
@@ -53,10 +65,13 @@ Expected behavior:
 - the Windows 98-styled 400-by-620 wallet opens directly;
 - the network control changes from **Checking network** to **PINS MATCH** when
   `explorer.bitnames.info` serves the pinned genesis and native asset;
-- the balance remains blank and wallet actions remain disabled;
-- the notice reports that the wallet engine is not installed.
+- wallet setup can generate a new local recovery phrase;
+- after creating and unlocking a disposable test wallet, synchronization shows
+  an `elements1...` receive address and explorer-backed balances;
+- send and receive are enabled, while issue/reissue/burn remain disabled.
 
-Those disabled states are expected and are not a browser-installation failure.
+Use only a new disposable phrase and valueless test coins. A zero balance is
+expected until that derived sidechain address is funded.
 
 ## Preview every screen
 
@@ -97,6 +112,31 @@ npm run test:live
 
 This performs read-only requests and fails closed unless the explorer matches
 the pinned ECX Alpha genesis and policy asset. It never signs or broadcasts.
+
+## Automated installed-extension smoke test
+
+After `npm run build`, follow
+[HEADLESS-EXTENSION-SMOKE.md](HEADLESS-EXTENSION-SMOKE.md) to exercise the real
+Manifest V3 worker, packaged WASM core, encrypted vault, lock/unlock, live
+wallet scan, and fail-closed unfunded send in a disposable browser profile.
+
+## Final live-coin proof
+
+The remaining public-network test needs a small amount of valueless native
+sidechain ECX:
+
+1. Create a new disposable wallet in the extension and copy its `elements1...`
+   receive address. Never share its recovery phrase.
+2. Ask the Elements+ operator for a small explicit native-ECX UTXO at that
+   address, or for the supported public deposit/faucet procedure, and ensure a
+   miner is online to confirm it.
+3. Refresh the wallet, prepare a small send to a second disposable Elements+
+   address, verify every review field, then approve and broadcast once.
+4. Confirm the returned transaction ID in the explorer before retrying.
+
+Before enabling confidential transactions, also obtain the exact commit/tag of
+the validator currently deployed behind the public network. Explicit native
+sends do not depend on that unresolved deployment distinction.
 
 ## Update after another push
 

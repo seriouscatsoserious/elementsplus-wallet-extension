@@ -1,8 +1,8 @@
 import type { LwkCapabilities, WalletSnapshot } from "../adapters/lwk.js";
 
-export type ViewName = "dashboard" | "assets" | "send" | "receive" | "issue" | "manage" | "setup" | "network";
+export type ViewName = "dashboard" | "assets" | "send" | "review" | "sent" | "receive" | "issue" | "manage" | "setup" | "network";
 
-const VIEWS = new Set<ViewName>(["dashboard", "assets", "send", "receive", "issue", "manage", "setup", "network"]);
+const VIEWS = new Set<ViewName>(["dashboard", "assets", "send", "review", "sent", "receive", "issue", "manage", "setup", "network"]);
 
 export function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -65,19 +65,23 @@ export function initializeShell(options: { readonly preview: boolean }): void {
 }
 
 export function setWalletActionsEnabled(capabilities: LwkCapabilities, unlocked: boolean): void {
-  // No transaction controller is connected in this scaffold. Capability bits
-  // from a future adapter must not make inert forms appear operational.
-  const transactionControllersInstalled = false;
-  const anyChainAction = transactionControllersInstalled
-    && unlocked
+  const explicitWalletReady = unlocked
     && capabilities.walletSync
     && capabilities.explicitTransactions;
+  // These controller routes do not exist yet. Capability bits alone must not
+  // expose inert or unsafe issuance controls.
+  const issuanceControllerInstalled = false;
+  const reissuanceControllerInstalled = false;
+  const burnControllerInstalled = false;
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-wallet-action]")) {
-    button.disabled = !anyChainAction;
+    const action = button.dataset["walletAction"];
+    button.disabled = action === "issue"
+      ? !(explicitWalletReady && issuanceControllerInstalled && capabilities.issuance)
+      : !explicitWalletReady;
   }
   const capabilityByForm = [
-    { id: "send-form", enabled: anyChainAction },
-    { id: "issue-form", enabled: transactionControllersInstalled && unlocked && capabilities.issuance },
+    { id: "send-form", enabled: explicitWalletReady },
+    { id: "issue-form", enabled: explicitWalletReady && issuanceControllerInstalled && capabilities.issuance },
   ];
   for (const form of capabilityByForm) {
     const root = document.getElementById(form.id);
@@ -85,8 +89,8 @@ export function setWalletActionsEnabled(capabilities: LwkCapabilities, unlocked:
     if (fieldset !== null && fieldset !== undefined) fieldset.disabled = !form.enabled;
   }
   const manageFieldsets = document.querySelectorAll<HTMLFieldSetElement>("[data-view='manage'] [data-chain-fieldset]");
-  if (manageFieldsets[0] !== undefined) manageFieldsets[0].disabled = !(transactionControllersInstalled && unlocked && capabilities.reissuance);
-  if (manageFieldsets[1] !== undefined) manageFieldsets[1].disabled = !(transactionControllersInstalled && unlocked && capabilities.burning);
+  if (manageFieldsets[0] !== undefined) manageFieldsets[0].disabled = !(explicitWalletReady && reissuanceControllerInstalled && capabilities.reissuance);
+  if (manageFieldsets[1] !== undefined) manageFieldsets[1].disabled = !(explicitWalletReady && burnControllerInstalled && capabilities.burning);
 }
 
 function assetLabel(asset: WalletSnapshot["assets"][number]): string {
@@ -124,7 +128,7 @@ function renderAmount(cell: HTMLTableCellElement, amount: string, caption: strin
 export function renderSnapshot(snapshot: WalletSnapshot): void {
   const native = snapshot.assets.find((asset) => asset.isNative);
   setText("ecx-balance", native === undefined ? "—" : `${native.amountAtomic} atomic`);
-  setText("balance-caption", native === undefined ? "Native asset was not returned by wallet sync" : "Verified explicit UTXO total");
+  setText("balance-caption", native === undefined ? "Native asset was not returned by wallet sync" : "Explorer-reported explicit UTXO total");
   setText("chain-tip", snapshot.tipHeight.toLocaleString("en-US"));
   setText("receive-address", snapshot.receiveAddress);
   const dashboard = element<HTMLTableSectionElement>("dashboard-assets");

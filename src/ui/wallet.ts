@@ -1,5 +1,5 @@
 import type { LwkCapabilities, WalletAsset, WalletSnapshot } from "../adapters/lwk.js";
-import { EcxAlphaEsploraClient } from "../network/ecx-alpha.js";
+import { EcxAlphaEsploraClient, resolveEcxAlphaAddress } from "../network/ecx-alpha.js";
 import { ECX_ALPHA_IDENTITY } from "../network/identity.js";
 import { sendExtensionMessage } from "../platform/browser.js";
 import { isPlainRecord } from "../shared/validation.js";
@@ -12,6 +12,12 @@ import {
   setWalletActionsEnabled,
   showView,
 } from "./shell.js";
+import {
+  parseBroadcastTransactionResult,
+  parsePreparedSendApproval,
+  parseSendDraft,
+  type PreparedSendApproval,
+} from "./send-flow.js";
 
 interface WalletStatus {
   readonly initialized: boolean;
@@ -33,6 +39,11 @@ let statusCache: WalletStatus | undefined;
 let generatedMnemonic = "";
 let restoreMode = false;
 let networkRequestRunning = false;
+let latestSnapshot: WalletSnapshot | undefined;
+let pendingApproval: PreparedSendApproval | undefined;
+let approvalExpiryTimer: ReturnType<typeof setTimeout> | undefined;
+let prepareRequestRunning = false;
+let approvalRequestRunning = false;
 
 function unwrap(value: unknown): unknown {
   if (!isPlainRecord(value) || typeof value["ok"] !== "boolean") throw new Error("Background returned a malformed response");
@@ -121,23 +132,69 @@ function parseSnapshot(value: unknown): WalletSnapshot {
     || !isPlainRecord(value["chain"])
     || value["chain"]["genesisHash"] !== ECX_ALPHA_IDENTITY.genesisHash
     || value["chain"]["nativeAssetId"] !== ECX_ALPHA_IDENTITY.nativeAssetId
-    || value["chain"]["headerChainVerified"] !== true
-    || value["chain"]["explicitOutputsOnly"] !== true
+    || value["chain"]["backend"] !== "explorer"
+    || value["chain"]["headerChainVerified"] !== false
+    || value["chain"]["transactionPolicy"] !== "explicit-only"
     || typeof value["tipHeight"] !== "number" || !Number.isSafeInteger(value["tipHeight"]) || value["tipHeight"] < 0
     || typeof value["tipHash"] !== "string" || !/^[0-9a-f]{64}$/.test(value["tipHash"])
     || typeof value["receiveAddress"] !== "string" || value["receiveAddress"].length === 0
     || typeof value["syncedAt"] !== "string" || !Array.isArray(value["assets"])
   ) throw new Error("Wallet snapshot is malformed");
+  const receiveAddress = resolveEcxAlphaAddress(value["receiveAddress"]);
+  if (receiveAddress.confidential) throw new Error("Wallet snapshot receive address must be explicit");
   return {
     chain: {
       genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
       nativeAssetId: ECX_ALPHA_IDENTITY.nativeAssetId,
-      headerChainVerified: true,
-      explicitOutputsOnly: true,
+      backend: "explorer",
+      headerChainVerified: false,
+      transactionPolicy: "explicit-only",
     },
-    tipHeight: value["tipHeight"], tipHash: value["tipHash"], receiveAddress: value["receiveAddress"],
+    tipHeight: value["tipHeight"], tipHash: value["tipHash"], receiveAddress: receiveAddress.canonical,
     assets: value["assets"].map(parseAsset), syncedAt: value["syncedAt"],
   };
+}
+
+function walletCanTransact(status: WalletStatus | undefined): boolean {
+  return status?.adapter.available === true
+    && status.unlocked
+    && status.adapter.capabilities.walletSync
+    && status.adapter.capabilities.explicitTransactions;
+}
+
+function clearPendingApproval(message = "No transaction is awaiting approval."): void {
+  if (approvalExpiryTimer !== undefined) clearTimeout(approvalExpiryTimer);
+  approvalExpiryTimer = undefined;
+  pendingApproval = undefined;
+  approvalRequestRunning = false;
+  element<HTMLButtonElement>("approve-broadcast").disabled = true;
+  setText("approval-status", message);
+}
+
+function configureTransactionStatus(status: WalletStatus): void {
+  const message = element<HTMLElement>("send-capability-status");
+  if (walletCanTransact(status)) {
+    message.className = "subtle-notice";
+    message.textContent = "Native ECX only. Amounts are whole atomic units; outputs are explicit / non-confidential.";
+    return;
+  }
+  message.className = "warning-banner";
+  message.textContent = status.unlocked
+    ? "This wallet engine does not support synchronized explicit transfers."
+    : "Unlock a wallet engine with synchronized explicit-transfer support to send.";
+}
+
+function applySnapshot(snapshot: WalletSnapshot): void {
+  latestSnapshot = snapshot;
+  renderSnapshot(snapshot);
+  const native = snapshot.assets.find((asset) => asset.isNative);
+  setText("send-available", native === undefined ? "Available —" : `Available ${native.amountAtomic} atomic units`);
+}
+
+async function synchronizeWalletSnapshot(): Promise<WalletSnapshot> {
+  const snapshot = parseSnapshot(unwrap(await sendExtensionMessage({ type: "wallet.snapshot" })));
+  applySnapshot(snapshot);
+  return snapshot;
 }
 
 function configureSetup(status: WalletStatus): void {
@@ -164,6 +221,11 @@ async function refreshStatus(): Promise<void> {
   lockButton.disabled = !status.unlocked;
   configureSetup(status);
   setWalletActionsEnabled(status.adapter.capabilities, status.unlocked);
+  configureTransactionStatus(status);
+  if (!walletCanTransact(status)) {
+    latestSnapshot = undefined;
+    clearPendingApproval(status.unlocked ? "Explicit transfers are unavailable." : "Wallet locked; approval cleared.");
+  }
   if (!status.adapter.available) {
     setNotice("Wallet engine not installed. Keys, addresses, balances, and transactions remain disabled.", "danger");
   } else if (!status.initialized) {
@@ -171,10 +233,9 @@ async function refreshStatus(): Promise<void> {
   } else if (!status.unlocked) {
     setNotice("Wallet locked. It locks again after five minutes without activity.");
   } else {
-    setNotice("Wallet unlocked. Synchronizing verified explicit UTXOs…", "success");
-    const snapshot = parseSnapshot(unwrap(await sendExtensionMessage({ type: "wallet.snapshot" })));
-    renderSnapshot(snapshot);
-    setNotice("Wallet unlocked. ECX Alpha snapshot verified.", "success");
+    setNotice("Wallet unlocked. Synchronizing explorer-backed explicit UTXOs…", "success");
+    await synchronizeWalletSnapshot();
+    setNotice("Wallet unlocked. ECX Alpha explorer snapshot loaded.", "success");
   }
 }
 
@@ -200,14 +261,167 @@ async function refreshNetwork(): Promise<void> {
   }
 }
 
+function inputNamed(form: HTMLFormElement, name: string): HTMLInputElement {
+  const control = form.elements.namedItem(name);
+  if (!(control instanceof HTMLInputElement)) throw new Error(`Missing send input: ${name}`);
+  return control;
+}
+
+function renderPreparedApproval(approval: PreparedSendApproval): void {
+  const summary = approval.summary;
+  setText("review-destination", summary.destination);
+  setText("review-amount", `${summary.amountAtomic} atomic units ECX`);
+  setText("review-asset", summary.assetId);
+  setText("review-fee", `${summary.networkFeeAtomic} atomic units ECX`);
+  setText("review-fee-asset", summary.networkFeeAssetId);
+  setText("review-fee-rate", `${summary.feeRate} atomic units / vbyte`);
+  setText("review-policy", summary.transactionPolicy);
+  setText("review-expiry", approval.expiresAt);
+  setText("review-summary-hash", approval.summaryHash);
+  setText("approval-status", "Review every value, then explicitly approve before the deadline.");
+  element<HTMLButtonElement>("approve-broadcast").disabled = false;
+
+  if (approvalExpiryTimer !== undefined) clearTimeout(approvalExpiryTimer);
+  const delay = Math.max(0, Date.parse(approval.expiresAt) - Date.now());
+  approvalExpiryTimer = setTimeout(() => {
+    if (pendingApproval !== approval || approvalRequestRunning) return;
+    clearPendingApproval("Approval expired. Return to Send and prepare the transaction again.");
+  }, Math.min(delay + 25, 2_147_483_647));
+}
+
+async function copyReceiveAddress(): Promise<void> {
+  const address = latestSnapshot?.receiveAddress;
+  if (address === undefined) throw new Error("No synchronized receive address is available");
+  const resolved = resolveEcxAlphaAddress(address);
+  if (resolved.confidential || resolved.canonical !== address) {
+    throw new Error("Receive address failed canonical explicit-address validation");
+  }
+
+  if (navigator.clipboard !== undefined) {
+    try {
+      await navigator.clipboard.writeText(address);
+      return;
+    } catch {
+      // The legacy copy path below remains scoped to this explicit click.
+    }
+  }
+  const scratch = document.createElement("textarea");
+  scratch.value = address;
+  scratch.readOnly = true;
+  scratch.style.position = "fixed";
+  scratch.style.opacity = "0";
+  document.body.append(scratch);
+  scratch.select();
+  const copied = document.execCommand("copy");
+  scratch.remove();
+  if (!copied) throw new Error("Browser denied clipboard access; select and copy the address manually");
+}
+
 initializeShell({ preview: false });
 
-for (const form of document.querySelectorAll<HTMLFormElement>("#send-form, #issue-form")) {
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    setNotice("TRANSACTION CONTROLLER IS NOT INSTALLED IN THIS SCAFFOLD.", "danger");
+element<HTMLFormElement>("send-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (prepareRequestRunning) return;
+  void (async () => {
+    const form = element<HTMLFormElement>("send-form");
+    const reviewButton = element<HTMLButtonElement>("review-transaction");
+    prepareRequestRunning = true;
+    reviewButton.disabled = true;
+    clearPendingApproval("Preparing transaction…");
+    setText("send-status", "Preparing an exact transaction for review…");
+    try {
+      if (!walletCanTransact(statusCache)) throw new Error("Wallet is locked or explicit transfers are unavailable");
+      const draft = parseSendDraft({
+        destination: inputNamed(form, "destination").value,
+        amountAtomic: inputNamed(form, "amount").value,
+        feeRate: inputNamed(form, "fee-rate").value,
+      });
+      inputNamed(form, "destination").value = draft.destination;
+      const prepared = unwrap(await sendExtensionMessage({
+        type: "transaction.prepare-send",
+        assetId: draft.assetId,
+        destination: draft.destination,
+        amountAtomic: draft.amountAtomic,
+        feeRate: draft.feeRate,
+      }));
+      const approval = parsePreparedSendApproval(prepared, draft);
+      pendingApproval = approval;
+      renderPreparedApproval(approval);
+      setText("send-status", "Transaction prepared. No signature has been made yet.");
+      showView("review");
+    } catch (error) {
+      clearPendingApproval("Preparation failed. Correct the send details and try again.");
+      setText("send-status", error instanceof Error ? error.message : "Transaction preparation failed");
+      showView("send");
+    } finally {
+      prepareRequestRunning = false;
+      reviewButton.disabled = !walletCanTransact(statusCache);
+    }
+  })();
+});
+
+element<HTMLButtonElement>("approve-broadcast").addEventListener("click", () => {
+  if (approvalRequestRunning) return;
+  void (async () => {
+    const approval = pendingApproval;
+    const button = element<HTMLButtonElement>("approve-broadcast");
+    if (approval === undefined) {
+      clearPendingApproval("Approval expired or was already used. Return to Send and prepare again.");
+      return;
+    }
+    if (Date.parse(approval.expiresAt) <= Date.now()) {
+      clearPendingApproval("Approval expired. Return to Send and prepare again.");
+      return;
+    }
+    approvalRequestRunning = true;
+    pendingApproval = undefined;
+    if (approvalExpiryTimer !== undefined) clearTimeout(approvalExpiryTimer);
+    approvalExpiryTimer = undefined;
+    button.disabled = true;
+    setText("approval-status", "Signing locally and submitting to the ECX Alpha explorer…");
+    try {
+      if (!walletCanTransact(statusCache)) throw new Error("Wallet locked before approval");
+      const result = parseBroadcastTransactionResult(unwrap(await sendExtensionMessage({
+        type: "transaction.approve-and-broadcast",
+        approvalToken: approval.approvalToken,
+        summaryHash: approval.summaryHash,
+      })));
+      setText("broadcast-txid", result.txid);
+      setText("post-broadcast-status", "Refreshing the explorer-backed wallet snapshot…");
+      showView("sent");
+      try {
+        await synchronizeWalletSnapshot();
+        setText("post-broadcast-status", "Wallet snapshot refreshed. Explorer state may lag until relay or confirmation.");
+      } catch {
+        setText("post-broadcast-status", "Transaction ID retained. Snapshot refresh failed; check the explorer before retrying anything.");
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Transaction approval failed";
+      setText("approval-status", `${detail} Approval is consumed; prepare again only after checking network state.`);
+      showView("review");
+    } finally {
+      approvalRequestRunning = false;
+    }
+  })();
+});
+
+for (const id of ["edit-transaction", "cancel-review"]) {
+  element<HTMLButtonElement>(id).addEventListener("click", () => {
+    clearPendingApproval("Review cancelled. Prepare the transaction again after editing.");
   });
 }
+
+element<HTMLButtonElement>("copy-receive-address").addEventListener("click", () => {
+  void copyReceiveAddress().then(
+    () => setText("receive-status", "Address copied to clipboard."),
+    (error: unknown) => setText("receive-status", error instanceof Error ? error.message : "Unable to copy address"),
+  );
+});
+
+element<HTMLFormElement>("issue-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  setNotice("Asset issuance is not enabled by the current reviewed adapter.", "danger");
+});
 
 for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-setup-target]")) {
   tab.addEventListener("click", () => { restoreMode = tab.dataset["setupTarget"] === "restore"; });
