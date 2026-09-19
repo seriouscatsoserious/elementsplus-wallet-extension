@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Elements+ Wallet</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header class="popup-title"><span>[E+]</span><strong>ELEMENTS+ WALLET</strong><span>[_][X]</span></header>
+      <section class="brand">
+        <strong>ECX+</strong>
+        <span>ALPHA ASSET TERMINAL</span>
+      </section>
+      <div class="chain-lock">CHAIN 672af009…96fa5bcd / SLOT 24 / NOT LIQUID</div>
+      <section class="readout">
+        <div><span>VAULT</span><output id="popup-vault">CHECKING</output></div>
+        <div><span>LWK</span><output id="popup-adapter">CHECKING</output></div>
+        <div><span>ECX</span><output>—</output></div>
+        <div><span>MODE</span><output class="orange">EXPLICIT ONLY</output></div>
+      </section>
+      <p id="popup-status" role="status">CONTACTING BACKGROUND WORKER…</p>
+      <div class="popup-actions">
+        <button id="open-wallet" type="button">OPEN WALLET TERMINAL &gt;&gt;</button>
+        <button id="open-setup" type="button">SETUP / RESTORE</button>
+      </div>
+      <footer>ALPHA SOFTWARE · TEST ASSETS ONLY · NO DEX</footer>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

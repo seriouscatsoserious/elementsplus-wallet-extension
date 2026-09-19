@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Elements+ Wallet / ECX Alpha</title>
+    <link rel="stylesheet" href="wallet.css">
+  </head>
+  <body>
+    <div class="terminal-window">
+      <header class="titlebar">
+        <span>[E+]</span>
+        <span class="title">ELEMENTS+ WALLET :: ECX ALPHA TERMINAL</span>
+        <span class="window-controls" aria-hidden="true"><i></i><i></i><i></i></span>
+      </header>
+
+      <div class="identity-strip">
+        <span class="alpha-tag">Alpha / Experimental</span>
+        <span class="identity-hash" title="672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd">
+          CHAIN 672af009…96fa5bcd · SLOT 24 · NOT LIQUID
+        </span>
+        <span id="network-live" class="state-tag">NET CHECK</span>
+        <span class="policy-tag">Explicit outputs only</span>
+      </div>
+
+      <div class="wallet-layout">
+        <aside class="sidebar">
+          <div class="wordmark"><strong>ECX+</strong><span>ASSET TERMINAL</span></div>
+          <div class="menu-label">WALLET MENU</div>
+          <nav aria-label="Wallet sections">
+            <button class="nav-button" data-view-target="dashboard" aria-current="page">01 DASHBOARD</button>
+            <button class="nav-button" data-view-target="assets">02 ASSETS</button>
+            <button class="nav-button" data-view-target="send">03 SEND</button>
+            <button class="nav-button" data-view-target="receive">04 RECEIVE</button>
+            <button class="nav-button" data-view-target="issue">05 ISSUE</button>
+            <button class="nav-button" data-view-target="manage">06 REISSUE/BURN</button>
+            <button class="nav-button" data-view-target="setup">07 SETUP</button>
+            <button class="nav-button" data-view-target="network">08 NETWORK ID</button>
+          </nav>
+          <div class="nav-spacer"></div>
+          <div class="sidebar-foot">
+            NO DEX MODULE<br>
+            NO LIQUID FALLBACK<br>
+            NO REMOTE SCRIPTS
+          </div>
+        </aside>
+
+        <main class="workspace">
+          <section class="screen" data-view="dashboard">
+            <header class="screen-header"><h1>Wallet dashboard</h1><small>READOUT 01 / LOCAL VAULT</small></header>
+            <p id="runtime-notice" class="notice">INITIALIZING EXTENSION CONTEXT…</p>
+            <section id="access-panel" class="box spaced-after">
+              <h2 class="box-title">Vault access / auto-lock 05:00</h2>
+              <div class="box-body">
+                <form id="unlock-form" class="form-grid">
+                  <label>Vault password<input id="unlock-password" type="password" maxlength="1024" autocomplete="current-password" disabled></label>
+                  <div class="form-actions"><button id="unlock-wallet" type="submit" disabled>UNLOCK WALLET &gt;&gt;</button><button id="lock-wallet" type="button" disabled>LOCK NOW</button></div>
+                </form>
+              </div>
+            </section>
+            <div class="dashboard-grid">
+              <section class="box">
+                <h2 class="box-title">Total ECX available</h2>
+                <div class="box-body balance">
+                  <output id="ecx-balance">—</output>
+                  <small id="balance-caption">No verified wallet snapshot loaded</small>
+                  <div class="ascii-meter" aria-hidden="true">[<b>////</b>............................] SYNC</div>
+                </div>
+              </section>
+              <section class="box">
+                <h2 class="box-title">System state</h2>
+                <div class="box-body">
+                  <dl class="kv">
+                    <div><dt>VAULT</dt><dd id="vault-state">CHECKING</dd></div>
+                    <div><dt>LWK</dt><dd id="adapter-state">CHECKING</dd></div>
+                    <div><dt>CHAIN</dt><dd>ECX ALPHA</dd></div>
+                    <div><dt>TIP</dt><dd id="chain-tip">—</dd></div>
+                    <div><dt>MEMPOOL</dt><dd id="mempool-count">—</dd></div>
+                  </dl>
+                </div>
+              </section>
+            </div>
+            <div class="action-grid">
+              <button type="button" data-view-link="send" data-wallet-action disabled>SEND ASSET</button>
+              <button type="button" data-view-link="receive" data-wallet-action disabled>RECEIVE</button>
+              <button type="button" data-view-link="issue" data-wallet-action disabled>ISSUE ASSET</button>
+            </div>
+            <section class="box spaced-before">
+              <h2 class="box-title">Asset register</h2>
+              <div class="box-body">
+                <table>
+                  <thead><tr><th>Asset</th><th>Identifier</th><th class="amount">Available</th></tr></thead>
+                  <tbody id="dashboard-assets">
+                    <tr><td class="native">ECX</td><td>62dce3bd…8f1d2da4</td><td class="amount">—</td></tr>
+                    <tr class="empty-row"><td colspan="3">[ AWAITING VERIFIED WALLET SYNC ]</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section class="screen" data-view="assets" hidden>
+            <header class="screen-header"><h1>Asset inventory</h1><small>READOUT 02 / EXPLICIT UTXOS</small></header>
+            <p class="notice info">Amounts appear only after LWK verifies and syncs this exact ECX Alpha identity.</p>
+            <section class="box">
+              <h2 class="box-title">Known wallet assets</h2>
+              <div class="box-body">
+                <table>
+                  <thead><tr><th>Ticker</th><th>Name / asset ID</th><th class="amount">Confirmed</th><th class="amount">Available</th></tr></thead>
+                  <tbody id="asset-inventory">
+                    <tr><td class="native">ECX</td><td><span class="dim">native / </span>62dce3bd…8f1d2da4</td><td class="amount">—</td><td class="amount">—</td></tr>
+                    <tr class="empty-row"><td colspan="4">NO ISSUED-ASSET DATA LOADED</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <details class="box spaced-before">
+              <summary class="box-title">ABOUT UNREGISTERED ASSETS</summary>
+              <div class="box-body dim">Ticker and name metadata are labels, not consensus identity. Always verify the complete 32-byte asset ID before acting.</div>
+            </details>
+          </section>
+
+          <section class="screen" data-view="send" hidden>
+            <header class="screen-header"><h1>Send asset</h1><small>OPERATION 03 / REVIEW REQUIRED</small></header>
+            <p class="notice danger">DISABLED: no reviewed LWK transaction adapter is installed. This screen cannot construct or sign a transaction.</p>
+            <form id="send-form">
+              <fieldset disabled data-chain-fieldset>
+                <legend>Transfer request</legend>
+                <div class="form-grid">
+                  <label class="wide">Destination address<input name="destination" autocomplete="off" spellcheck="false" placeholder="elements1… or explicit ECX Alpha address"></label>
+                  <label>Asset<select name="asset"><option>ECX — native asset</option></select></label>
+                  <label>Amount (atomic units)<input name="amount" inputmode="numeric" pattern="[0-9]+" placeholder="0"></label>
+                  <label>Fee rate<input name="fee-rate" inputmode="decimal" placeholder="automatic"></label>
+                  <label>Output privacy<select name="privacy"><option>EXPLICIT / NON-CONFIDENTIAL</option></select></label>
+                </div>
+                <div class="form-actions"><button type="submit">REVIEW TRANSACTION &gt;&gt;</button><small>Signing occurs only after a separate summary screen.</small></div>
+              </fieldset>
+            </form>
+          </section>
+
+          <section class="screen" data-view="receive" hidden>
+            <header class="screen-header"><h1>Receive asset</h1><small>OPERATION 04 / ADDRESS 000</small></header>
+            <p class="notice info">A receive address will be shown only after LWK derives it for the pinned chain identity.</p>
+            <div class="receive-grid">
+              <div class="qr-placeholder">QR<br>NOT<br>GENERATED</div>
+              <div>
+                <label>ECX Alpha receive address<div id="receive-address" class="address-box">—</div></label>
+                <dl class="kv spaced-before-small">
+                  <div><dt>NETWORK</dt><dd>ECX Alpha / slot 24</dd></div>
+                  <div><dt>FORMAT</dt><dd>explicit output</dd></div>
+                  <div><dt>STATUS</dt><dd class="orange">adapter unavailable</dd></div>
+                </dl>
+              </div>
+            </div>
+            <div class="form-actions"><button type="button" disabled data-wallet-action>COPY ADDRESS</button><button type="button" disabled data-wallet-action>NEW ADDRESS</button></div>
+          </section>
+
+          <section class="screen" data-view="issue" hidden>
+            <header class="screen-header"><h1>Issue new asset</h1><small>OPERATION 05 / ELEMENTS ISSUANCE</small></header>
+            <p class="notice danger">ALPHA ONLY. Issuance identifiers and reissuance tokens are protocol objects. Losing the token can permanently remove reissuance ability.</p>
+            <form id="issue-form">
+              <fieldset disabled data-chain-fieldset>
+                <legend>Issuance parameters</legend>
+                <div class="form-grid">
+                  <label>Display ticker <small>Local metadata; not consensus</small><input name="ticker" maxlength="12" placeholder="ASSET"></label>
+                  <label>Display name <small>Local metadata; not consensus</small><input name="name" maxlength="64" placeholder="My test asset"></label>
+                  <label>Asset amount (atomic units)<input name="asset-amount" inputmode="numeric" pattern="[0-9]+" placeholder="0"></label>
+                  <label>Reissuance token amount<input name="token-amount" inputmode="numeric" pattern="[0-9]+" value="1"></label>
+                  <label class="wide">Asset destination<input name="asset-destination" placeholder="derive from wallet"></label>
+                  <label class="wide">Token destination<input name="token-destination" placeholder="derive from wallet"></label>
+                </div>
+                <div class="form-actions"><button type="submit">REVIEW ISSUANCE &gt;&gt;</button></div>
+              </fieldset>
+            </form>
+          </section>
+
+          <section class="screen" data-view="manage" hidden>
+            <header class="screen-header"><h1>Reissue / burn</h1><small>OPERATION 06 / IRREVERSIBLE</small></header>
+            <fieldset disabled data-chain-fieldset>
+              <legend>Reissue asset</legend>
+              <div class="form-grid">
+                <label>Asset ID<select><option>No verified reissuance tokens</option></select></label>
+                <label>Amount (atomic units)<input inputmode="numeric" placeholder="0"></label>
+                <label class="wide">Destination<input placeholder="derive from wallet"></label>
+              </div>
+              <div class="form-actions"><button type="button">REVIEW REISSUANCE &gt;&gt;</button></div>
+            </fieldset>
+            <fieldset class="danger-zone" disabled data-chain-fieldset>
+              <legend>Burn asset permanently</legend>
+              <div class="form-grid">
+                <label>Asset ID<select><option>No verified assets loaded</option></select></label>
+                <label>Amount (atomic units)<input inputmode="numeric" placeholder="0"></label>
+              </div>
+              <p class="dim">Burning is irreversible. The review screen must display the complete asset ID and exact atomic amount.</p>
+              <div class="form-actions"><button type="button">REVIEW BURN &gt;&gt;</button></div>
+            </fieldset>
+          </section>
+
+          <section class="screen" data-view="setup" hidden>
+            <header class="screen-header"><h1>Wallet setup</h1><small>OPERATION 07 / LOCAL ENCRYPTED VAULT</small></header>
+            <p class="notice danger">TEST ASSETS ONLY. Never import a phrase that controls valuable funds. The LWK adapter is not installed in this scaffold.</p>
+            <div class="tabs" role="tablist">
+              <button id="create-tab" class="tab" type="button" role="tab" aria-selected="true" data-setup-target="create">CREATE NEW</button>
+              <button id="restore-tab" class="tab" type="button" role="tab" aria-selected="false" data-setup-target="restore">RESTORE PHRASE</button>
+            </div>
+            <form id="setup-form">
+              <section class="setup-pane" data-setup-pane="create">
+                <fieldset>
+                  <legend>01 / Recovery phrase</legend>
+                  <div id="generated-phrase" class="phrase-output">LWK REQUIRED — NO PHRASE GENERATED</div>
+                  <div class="form-actions"><button id="generate-phrase" type="button" disabled>GENERATE WITH LWK</button></div>
+                </fieldset>
+              </section>
+              <section class="setup-pane" data-setup-pane="restore" hidden>
+                <fieldset>
+                  <legend>01 / Existing recovery phrase</legend>
+                  <label>12, 15, 18, 21, or 24 words<textarea id="restore-phrase" disabled autocomplete="off" autocapitalize="none" spellcheck="false"></textarea></label>
+                </fieldset>
+              </section>
+              <fieldset>
+                <legend>02 / Encrypt local vault</legend>
+                <div class="form-grid">
+                  <label>Vault password <small>Minimum 12 UTF-8 bytes</small><input id="setup-password" type="password" minlength="12" maxlength="1024" disabled autocomplete="new-password"></label>
+                  <label>Repeat password<input id="setup-confirm" type="password" minlength="12" maxlength="1024" disabled autocomplete="new-password"></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>03 / Chain lock</legend>
+                <label><span><input id="backup-ack" type="checkbox" disabled> I have recorded the recovery phrase offline and understand it cannot be recovered by the extension.</span></label>
+                <label><span><input id="identity-ack" type="checkbox" disabled> I verified ECX Alpha genesis <code>672af009…96fa5bcd</code>, slot 24, and explicit-only policy.</span></label>
+                <div class="form-actions"><button id="create-vault" type="submit" disabled>CREATE ENCRYPTED VAULT &gt;&gt;</button></div>
+              </fieldset>
+              <p id="setup-status" class="notice" role="status" aria-live="polite">WAITING FOR REVIEWED LWK ADAPTER.</p>
+            </form>
+          </section>
+
+          <section class="screen" data-view="network" hidden>
+            <header class="screen-header"><h1>Pinned network identity</h1><small>READOUT 08 / FAIL-CLOSED</small></header>
+            <p class="notice info">This extension is bound to one chain. A mismatched genesis or native asset must stop synchronization and signing.</p>
+            <section class="box">
+              <h2 class="box-title">ECX Alpha / Elements+ V11</h2>
+              <div class="box-body">
+                <dl class="kv">
+                  <div><dt>CHAIN</dt><dd>ECX Alpha</dd></div>
+                  <div><dt>IMPLEMENTATION</dt><dd>Elements+ drivechain fork</dd></div>
+                  <div><dt>SIDECHAIN SLOT</dt><dd>24</dd></div>
+                  <div><dt>GENESIS</dt><dd class="mono-hash">672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd</dd></div>
+                  <div><dt>NATIVE ASSET</dt><dd class="mono-hash">62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4</dd></div>
+                  <div><dt>PARENT GENESIS</dt><dd class="mono-hash">000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f</dd></div>
+                  <div><dt>EXPLORER</dt><dd>explorer.bitnames.info</dd></div>
+                  <div><dt>TX POLICY</dt><dd class="orange">EXPLICIT / NON-CONFIDENTIAL ONLY</dd></div>
+                  <div><dt>DEX</dt><dd>NOT INSTALLED</dd></div>
+                </dl>
+              </div>
+            </section>
+          </section>
+        </main>
+      </div>
+
+      <footer class="statusbar">
+        <span id="footer-status" class="status-main">BOOTING…</span>
+        <span id="footer-net">NET: CHECKING</span>
+        <span>PRIVACY: EXPLICIT</span>
+        <span id="footer-clock">--:--:-- UTC</span>
+      </footer>
+    </div>
+    <script type="module" src="wallet.js"></script>
+  </body>
+</html>

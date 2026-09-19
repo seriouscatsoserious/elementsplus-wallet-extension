@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Elements+ Wallet — ECX Alpha",
+  "version": "0.1.0",
+  "description": "Experimental explicit-asset wallet for the ECX Alpha Elements+ drivechain.",
+  "background": {
+    "scripts": ["src/background/service-worker.js"],
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Elements+ Wallet",
+    "default_popup": "src/ui/popup.html"
+  },
+  "options_ui": {
+    "page": "src/ui/wallet.html",
+    "open_in_tab": true
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["https://explorer.bitnames.info/*"],
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'self'; img-src 'self' data:; connect-src https://explorer.bitnames.info; font-src 'none'; media-src 'none'; form-action 'none'; worker-src 'self'"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "elementsplus-wallet@ecx-alpha.test",
+      "strict_min_version": "121.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  }
+}
