@@ -145,16 +145,17 @@ function configureSetup(status: WalletStatus): void {
   for (const id of ["generate-phrase", "restore-phrase", "setup-password", "setup-confirm", "backup-ack", "identity-ack", "create-vault"]) {
     element<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>(id).disabled = !enabled;
   }
-  if (status.initialized) setText("setup-status", "A VAULT ALREADY EXISTS. THIS BUILD WILL NOT OVERWRITE IT.");
-  else if (!enabled) setText("setup-status", "WAITING FOR REVIEWED LWK ADAPTER.");
+  if (status.initialized) setText("setup-status", "A vault already exists. This build will not overwrite it.");
+  else if (!enabled) setText("setup-status", "Waiting for the reviewed wallet adapter.");
 }
 
 async function refreshStatus(): Promise<void> {
   const status = parseStatus(unwrap(await sendExtensionMessage({ type: "wallet.status" })));
   statusCache = status;
-  setText("vault-state", status.initialized ? (status.unlocked ? "UNLOCKED" : "LOCKED") : "NOT INITIALIZED");
-  setText("adapter-state", status.adapter.available ? status.adapter.implementation.toUpperCase() : "NOT INSTALLED");
-  setText("footer-status", status.adapter.available ? (status.unlocked ? "WALLET UNLOCKED / AUTO-LOCK ARMED" : "WALLET LOCKED") : "LWK NOT INSTALLED / CHAIN ACTIONS DISABLED");
+  setText("vault-state", status.initialized ? (status.unlocked ? "Unlocked" : "Locked") : "Not initialized");
+  setText("account-state", status.initialized ? (status.unlocked ? "Unlocked" : "Locked") : "Not set up");
+  setText("adapter-state", status.adapter.available ? status.adapter.implementation : "Not installed");
+  setText("footer-status", status.adapter.available ? (status.unlocked ? "Auto-lock active" : "Wallet locked") : "Chain actions disabled");
   const unlockInput = element<HTMLInputElement>("unlock-password");
   const unlockButton = element<HTMLButtonElement>("unlock-wallet");
   const lockButton = element<HTMLButtonElement>("lock-wallet");
@@ -164,16 +165,16 @@ async function refreshStatus(): Promise<void> {
   configureSetup(status);
   setWalletActionsEnabled(status.adapter.capabilities, status.unlocked);
   if (!status.adapter.available) {
-    setNotice("LWK ADAPTER NOT INSTALLED — THIS IS A FAIL-CLOSED UI SHELL. NO KEYS, ADDRESSES, BALANCES, OR TRANSACTIONS ARE BEING GENERATED.", "danger");
+    setNotice("Wallet engine not installed. Keys, addresses, balances, and transactions remain disabled.", "danger");
   } else if (!status.initialized) {
-    setNotice("NO LOCAL VAULT. CREATE OR RESTORE A DISPOSABLE ECX ALPHA WALLET TO CONTINUE.", "info");
+    setNotice("No local wallet yet. Create or import a disposable ECX Alpha wallet to continue.", "info");
   } else if (!status.unlocked) {
-    setNotice("ENCRYPTED VAULT PRESENT / LOCKED. UNLOCKING STARTS A FIVE-MINUTE INACTIVITY TIMER.");
+    setNotice("Wallet locked. It locks again after five minutes without activity.");
   } else {
-    setNotice("VAULT UNLOCKED. SYNCHRONIZING VERIFIED EXPLICIT UTXOS…", "success");
+    setNotice("Wallet unlocked. Synchronizing verified explicit UTXOs…", "success");
     const snapshot = parseSnapshot(unwrap(await sendExtensionMessage({ type: "wallet.snapshot" })));
     renderSnapshot(snapshot);
-    setNotice("VAULT UNLOCKED / ECX ALPHA SNAPSHOT VERIFIED.", "success");
+    setNotice("Wallet unlocked. ECX Alpha snapshot verified.", "success");
   }
 }
 

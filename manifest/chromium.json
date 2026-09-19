@@ -10,7 +10,7 @@
   },
   "action": {
     "default_title": "Elements+ Wallet",
-    "default_popup": "src/ui/popup.html"
+    "default_popup": "src/ui/wallet.html"
   },
   "options_page": "src/ui/wallet.html",
   "permissions": ["storage"],

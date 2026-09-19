@@ -7,262 +7,177 @@
     <link rel="stylesheet" href="wallet.css">
   </head>
   <body>
-    <div class="terminal-window">
-      <header class="titlebar">
-        <span>[E+]</span>
-        <span class="title">ELEMENTS+ WALLET :: ECX ALPHA TERMINAL</span>
-        <span class="window-controls" aria-hidden="true"><i></i><i></i><i></i></span>
+    <div class="wallet-app">
+      <header class="app-header">
+        <button class="brand-button" type="button" data-view-link="dashboard" aria-label="Open wallet home">
+          <span class="brand-mark">E+</span>
+          <span class="brand-copy"><strong>Elements+</strong><small>Wallet</small></span>
+        </button>
+        <button class="network-pill" type="button" data-view-link="network" aria-label="Open network settings">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span><strong>ECX Alpha</strong><small id="network-live">Checking network</small></span>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 5 5 5-5 5"/></svg>
+        </button>
+        <button class="icon-button" type="button" data-view-link="network" aria-label="Open settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.64a1.7 1.7 0 0 0 1.03-1.56V3h4v.08A1.7 1.7 0 0 0 15 4.64a1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.36 9a1.7 1.7 0 0 0 1.56 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+        </button>
       </header>
 
-      <div class="identity-strip">
-        <span class="alpha-tag">Alpha / Experimental</span>
-        <span class="identity-hash" title="672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd">
-          CHAIN 672af009…96fa5bcd · SLOT 24 · NOT LIQUID
-        </span>
-        <span id="network-live" class="state-tag">NET CHECK</span>
-        <span class="policy-tag">Explicit outputs only</span>
-      </div>
-
-      <div class="wallet-layout">
-        <aside class="sidebar">
-          <div class="wordmark"><strong>ECX+</strong><span>ASSET TERMINAL</span></div>
-          <div class="menu-label">WALLET MENU</div>
-          <nav aria-label="Wallet sections">
-            <button class="nav-button" data-view-target="dashboard" aria-current="page">01 DASHBOARD</button>
-            <button class="nav-button" data-view-target="assets">02 ASSETS</button>
-            <button class="nav-button" data-view-target="send">03 SEND</button>
-            <button class="nav-button" data-view-target="receive">04 RECEIVE</button>
-            <button class="nav-button" data-view-target="issue">05 ISSUE</button>
-            <button class="nav-button" data-view-target="manage">06 REISSUE/BURN</button>
-            <button class="nav-button" data-view-target="setup">07 SETUP</button>
-            <button class="nav-button" data-view-target="network">08 NETWORK ID</button>
-          </nav>
-          <div class="nav-spacer"></div>
-          <div class="sidebar-foot">
-            NO DEX MODULE<br>
-            NO LIQUID FALLBACK<br>
-            NO REMOTE SCRIPTS
+      <main class="app-content">
+        <section class="screen home-screen" data-view="dashboard">
+          <div class="account-row">
+            <div><span class="eyebrow">My wallet</span><strong>ECX Alpha account</strong></div>
+            <button id="account-state" class="account-chip" type="button" data-view-link="setup">Not set up</button>
           </div>
-        </aside>
 
-        <main class="workspace">
-          <section class="screen" data-view="dashboard">
-            <header class="screen-header"><h1>Wallet dashboard</h1><small>READOUT 01 / LOCAL VAULT</small></header>
-            <p id="runtime-notice" class="notice">INITIALIZING EXTENSION CONTEXT…</p>
-            <section id="access-panel" class="box spaced-after">
-              <h2 class="box-title">Vault access / auto-lock 05:00</h2>
-              <div class="box-body">
-                <form id="unlock-form" class="form-grid">
-                  <label>Vault password<input id="unlock-password" type="password" maxlength="1024" autocomplete="current-password" disabled></label>
-                  <div class="form-actions"><button id="unlock-wallet" type="submit" disabled>UNLOCK WALLET &gt;&gt;</button><button id="lock-wallet" type="button" disabled>LOCK NOW</button></div>
-                </form>
-              </div>
-            </section>
-            <div class="dashboard-grid">
-              <section class="box">
-                <h2 class="box-title">Total ECX available</h2>
-                <div class="box-body balance">
-                  <output id="ecx-balance">—</output>
-                  <small id="balance-caption">No verified wallet snapshot loaded</small>
-                  <div class="ascii-meter" aria-hidden="true">[<b>////</b>............................] SYNC</div>
-                </div>
-              </section>
-              <section class="box">
-                <h2 class="box-title">System state</h2>
-                <div class="box-body">
-                  <dl class="kv">
-                    <div><dt>VAULT</dt><dd id="vault-state">CHECKING</dd></div>
-                    <div><dt>LWK</dt><dd id="adapter-state">CHECKING</dd></div>
-                    <div><dt>CHAIN</dt><dd>ECX ALPHA</dd></div>
-                    <div><dt>TIP</dt><dd id="chain-tip">—</dd></div>
-                    <div><dt>MEMPOOL</dt><dd id="mempool-count">—</dd></div>
-                  </dl>
-                </div>
-              </section>
-            </div>
-            <div class="action-grid">
-              <button type="button" data-view-link="send" data-wallet-action disabled>SEND ASSET</button>
-              <button type="button" data-view-link="receive" data-wallet-action disabled>RECEIVE</button>
-              <button type="button" data-view-link="issue" data-wallet-action disabled>ISSUE ASSET</button>
-            </div>
-            <section class="box spaced-before">
-              <h2 class="box-title">Asset register</h2>
-              <div class="box-body">
-                <table>
-                  <thead><tr><th>Asset</th><th>Identifier</th><th class="amount">Available</th></tr></thead>
-                  <tbody id="dashboard-assets">
-                    <tr><td class="native">ECX</td><td>62dce3bd…8f1d2da4</td><td class="amount">—</td></tr>
-                    <tr class="empty-row"><td colspan="3">[ AWAITING VERIFIED WALLET SYNC ]</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
+          <section class="balance-card" aria-labelledby="balance-heading">
+            <div class="balance-topline"><span id="balance-heading">Total balance</span><span class="testnet-chip">Test assets</span></div>
+            <div class="balance-value"><output id="ecx-balance">—</output><span>ECX</span></div>
+            <small id="balance-caption">No verified wallet snapshot loaded</small>
           </section>
 
-          <section class="screen" data-view="assets" hidden>
-            <header class="screen-header"><h1>Asset inventory</h1><small>READOUT 02 / EXPLICIT UTXOS</small></header>
-            <p class="notice info">Amounts appear only after LWK verifies and syncs this exact ECX Alpha identity.</p>
-            <section class="box">
-              <h2 class="box-title">Known wallet assets</h2>
-              <div class="box-body">
-                <table>
-                  <thead><tr><th>Ticker</th><th>Name / asset ID</th><th class="amount">Confirmed</th><th class="amount">Available</th></tr></thead>
-                  <tbody id="asset-inventory">
-                    <tr><td class="native">ECX</td><td><span class="dim">native / </span>62dce3bd…8f1d2da4</td><td class="amount">—</td><td class="amount">—</td></tr>
-                    <tr class="empty-row"><td colspan="4">NO ISSUED-ASSET DATA LOADED</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-            <details class="box spaced-before">
-              <summary class="box-title">ABOUT UNREGISTERED ASSETS</summary>
-              <div class="box-body dim">Ticker and name metadata are labels, not consensus identity. Always verify the complete 32-byte asset ID before acting.</div>
-            </details>
+          <div class="quick-actions" aria-label="Wallet actions">
+            <button type="button" data-view-link="send" data-wallet-action disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 17 10-10M8 7h9v9"/></svg></span><span>Send</span></button>
+            <button type="button" data-view-link="receive" data-wallet-action disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 7-10 10M16 17H7V8"/></svg></span><span>Receive</span></button>
+            <button type="button" data-view-link="issue" data-wallet-action disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span>Issue</span></button>
+            <button type="button" data-view-link="manage"><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/></svg></span><span>More</span></button>
+          </div>
+
+          <p id="runtime-notice" class="notice" role="status">Initializing extension…</p>
+
+          <section class="content-card asset-card">
+            <div class="card-tabs">
+              <button type="button" class="card-tab active" data-view-link="assets">Assets</button>
+              <button type="button" class="card-tab" disabled>Activity</button>
+              <button type="button" class="text-button" data-view-link="assets">View all</button>
+            </div>
+            <table class="asset-table">
+              <thead class="visually-hidden"><tr><th>Asset</th><th>Identifier</th><th>Balance</th></tr></thead>
+              <tbody id="dashboard-assets">
+                <tr><td><span class="asset-name"><span class="token-icon">E</span><span><strong>ECX</strong><small>Alpha ECX</small></span></span></td><td class="asset-id">62dce3bd…8f1d2da4</td><td class="amount"><strong>—</strong><small>Not synced</small></td></tr>
+              </tbody>
+            </table>
           </section>
 
-          <section class="screen" data-view="send" hidden>
-            <header class="screen-header"><h1>Send asset</h1><small>OPERATION 03 / REVIEW REQUIRED</small></header>
-            <p class="notice danger">DISABLED: no reviewed LWK transaction adapter is installed. This screen cannot construct or sign a transaction.</p>
-            <form id="send-form">
-              <fieldset disabled data-chain-fieldset>
-                <legend>Transfer request</legend>
-                <div class="form-grid">
-                  <label class="wide">Destination address<input name="destination" autocomplete="off" spellcheck="false" placeholder="elements1… or explicit ECX Alpha address"></label>
-                  <label>Asset<select name="asset"><option>ECX — native asset</option></select></label>
-                  <label>Amount (atomic units)<input name="amount" inputmode="numeric" pattern="[0-9]+" placeholder="0"></label>
-                  <label>Fee rate<input name="fee-rate" inputmode="decimal" placeholder="automatic"></label>
-                  <label>Output privacy<select name="privacy"><option>EXPLICIT / NON-CONFIDENTIAL</option></select></label>
-                </div>
-                <div class="form-actions"><button type="submit">REVIEW TRANSACTION &gt;&gt;</button><small>Signing occurs only after a separate summary screen.</small></div>
-              </fieldset>
+          <section id="access-panel" class="content-card access-card">
+            <div class="card-heading">
+              <div><span class="card-icon lock-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><span><strong>Wallet access</strong><small>Local encrypted vault</small></span></div>
+              <span id="vault-state" class="state-label">Checking</span>
+            </div>
+            <form id="unlock-form" class="unlock-form">
+              <label><span class="visually-hidden">Vault password</span><input id="unlock-password" type="password" maxlength="1024" autocomplete="current-password" placeholder="Vault password" disabled></label>
+              <button id="unlock-wallet" class="primary-button compact" type="submit" disabled>Unlock</button>
+              <button id="lock-wallet" class="secondary-button compact" type="button" disabled>Lock</button>
             </form>
+            <div class="access-meta"><span>Signer <strong id="adapter-state">Checking</strong></span><span id="footer-status">Starting…</span></div>
           </section>
 
-          <section class="screen" data-view="receive" hidden>
-            <header class="screen-header"><h1>Receive asset</h1><small>OPERATION 04 / ADDRESS 000</small></header>
-            <p class="notice info">A receive address will be shown only after LWK derives it for the pinned chain identity.</p>
-            <div class="receive-grid">
-              <div class="qr-placeholder">QR<br>NOT<br>GENERATED</div>
-              <div>
-                <label>ECX Alpha receive address<div id="receive-address" class="address-box">—</div></label>
-                <dl class="kv spaced-before-small">
-                  <div><dt>NETWORK</dt><dd>ECX Alpha / slot 24</dd></div>
-                  <div><dt>FORMAT</dt><dd>explicit output</dd></div>
-                  <div><dt>STATUS</dt><dd class="orange">adapter unavailable</dd></div>
-                </dl>
-              </div>
-            </div>
-            <div class="form-actions"><button type="button" disabled data-wallet-action>COPY ADDRESS</button><button type="button" disabled data-wallet-action>NEW ADDRESS</button></div>
-          </section>
+          <section class="network-summary"><div><span>Chain tip</span><strong id="chain-tip">—</strong></div><div><span>Mempool</span><strong id="mempool-count">—</strong></div></section>
+        </section>
 
-          <section class="screen" data-view="issue" hidden>
-            <header class="screen-header"><h1>Issue new asset</h1><small>OPERATION 05 / ELEMENTS ISSUANCE</small></header>
-            <p class="notice danger">ALPHA ONLY. Issuance identifiers and reissuance tokens are protocol objects. Losing the token can permanently remove reissuance ability.</p>
-            <form id="issue-form">
-              <fieldset disabled data-chain-fieldset>
-                <legend>Issuance parameters</legend>
-                <div class="form-grid">
-                  <label>Display ticker <small>Local metadata; not consensus</small><input name="ticker" maxlength="12" placeholder="ASSET"></label>
-                  <label>Display name <small>Local metadata; not consensus</small><input name="name" maxlength="64" placeholder="My test asset"></label>
-                  <label>Asset amount (atomic units)<input name="asset-amount" inputmode="numeric" pattern="[0-9]+" placeholder="0"></label>
-                  <label>Reissuance token amount<input name="token-amount" inputmode="numeric" pattern="[0-9]+" value="1"></label>
-                  <label class="wide">Asset destination<input name="asset-destination" placeholder="derive from wallet"></label>
-                  <label class="wide">Token destination<input name="token-destination" placeholder="derive from wallet"></label>
-                </div>
-                <div class="form-actions"><button type="submit">REVIEW ISSUANCE &gt;&gt;</button></div>
-              </fieldset>
-            </form>
+        <section class="screen" data-view="assets" hidden>
+          <header class="view-header">
+            <button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+            <div><h1>Assets</h1><p>Your explicit ECX Alpha assets</p></div>
+            <button type="button" class="icon-button small" data-view-link="issue" aria-label="Issue an asset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+          </header>
+          <div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>Search assets</span></div>
+          <p class="subtle-notice">Balances appear only after the wallet adapter verifies this exact chain and synchronizes explicit UTXOs.</p>
+          <section class="content-card">
+            <table class="asset-table inventory-table">
+              <thead><tr><th>Asset</th><th>Asset ID</th><th class="amount">Available</th></tr></thead>
+              <tbody id="asset-inventory">
+                <tr><td><span class="asset-name"><span class="token-icon">E</span><span><strong>ECX</strong><small>Native asset</small></span></span></td><td class="asset-id">62dce3bd…8f1d2da4</td><td class="amount"><strong>—</strong><small>Not synced</small></td></tr>
+              </tbody>
+            </table>
           </section>
+          <button class="wide-link" type="button" data-view-link="manage"><span>Manage assets</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+          <p class="footnote">Asset names and tickers are display metadata. The complete 32-byte asset ID is authoritative.</p>
+        </section>
 
-          <section class="screen" data-view="manage" hidden>
-            <header class="screen-header"><h1>Reissue / burn</h1><small>OPERATION 06 / IRREVERSIBLE</small></header>
+        <section class="screen" data-view="send" hidden>
+          <header class="view-header"><button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Send</h1><p>ECX Alpha transfer</p></div><span></span></header>
+          <p class="warning-banner">Signing is disabled until the reviewed LWK adapter is installed.</p>
+          <form id="send-form" class="flow-form">
             <fieldset disabled data-chain-fieldset>
-              <legend>Reissue asset</legend>
-              <div class="form-grid">
-                <label>Asset ID<select><option>No verified reissuance tokens</option></select></label>
-                <label>Amount (atomic units)<input inputmode="numeric" placeholder="0"></label>
-                <label class="wide">Destination<input placeholder="derive from wallet"></label>
-              </div>
-              <div class="form-actions"><button type="button">REVIEW REISSUANCE &gt;&gt;</button></div>
+              <label>Recipient<input name="destination" autocomplete="off" spellcheck="false" placeholder="Paste ECX Alpha address"></label>
+              <label>Asset<select name="asset"><option>ECX — native asset</option></select></label>
+              <section class="amount-entry"><div><label for="send-amount">Amount</label><button type="button" disabled>Max</button></div><div><input id="send-amount" name="amount" inputmode="numeric" pattern="[0-9]+" placeholder="0"><strong>ECX</strong></div><small>Available —</small></section>
+              <label>Fee rate<input name="fee-rate" inputmode="decimal" placeholder="Automatic"></label>
+              <label>Output privacy<select name="privacy"><option>Explicit / non-confidential</option></select></label>
+              <button class="primary-button sticky-action" type="submit">Review transaction</button>
             </fieldset>
-            <fieldset class="danger-zone" disabled data-chain-fieldset>
-              <legend>Burn asset permanently</legend>
-              <div class="form-grid">
-                <label>Asset ID<select><option>No verified assets loaded</option></select></label>
-                <label>Amount (atomic units)<input inputmode="numeric" placeholder="0"></label>
-              </div>
-              <p class="dim">Burning is irreversible. The review screen must display the complete asset ID and exact atomic amount.</p>
-              <div class="form-actions"><button type="button">REVIEW BURN &gt;&gt;</button></div>
+          </form>
+        </section>
+
+        <section class="screen" data-view="receive" hidden>
+          <header class="view-header"><button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Receive</h1><p>ECX Alpha address</p></div><span></span></header>
+          <p class="subtle-notice">An address appears only after the wallet adapter derives it for the pinned ECX Alpha identity.</p>
+          <div class="qr-card" aria-label="QR code unavailable"><div class="qr-grid" aria-hidden="true"><i></i><i></i><i></i><i></i><b>E+</b><i></i><i></i><i></i><i></i></div><span>QR code unavailable</span></div>
+          <div class="receive-account"><strong>ECX Alpha account</strong><small>Explicit address · sidechain slot 24</small></div>
+          <div id="receive-address" class="address-box">—</div>
+          <div class="two-actions"><button type="button" class="primary-button" disabled data-wallet-action>Copy address</button><button type="button" class="secondary-button" disabled data-wallet-action>New address</button></div>
+        </section>
+
+        <section class="screen" data-view="issue" hidden>
+          <header class="view-header"><button type="button" class="back-button" data-view-link="assets" aria-label="Back to assets"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Create asset</h1><p>Step 1 of 4 · Details and supply</p></div><span></span></header>
+          <p class="warning-banner">Alpha test assets only. Asset IDs—not names or tickers—are authoritative.</p>
+          <form id="issue-form" class="flow-form">
+            <fieldset disabled data-chain-fieldset>
+              <div class="section-label">Asset details</div>
+              <div class="field-row"><label>Name<input name="name" maxlength="64" placeholder="My test asset"></label><label>Ticker<input name="ticker" maxlength="12" placeholder="ASSET"></label></div>
+              <label>Initial supply<input name="asset-amount" inputmode="numeric" pattern="[0-9]+" placeholder="0"></label>
+              <label>Reissuance token amount<input name="token-amount" inputmode="numeric" pattern="[0-9]+" value="1"></label>
+              <div class="inline-explainer"><strong>Reissuable supply</strong><span>Control of the reissuance token controls future supply.</span></div>
+              <label>Asset destination<input name="asset-destination" placeholder="Derive from this wallet"></label>
+              <label>Token destination<input name="token-destination" placeholder="Derive from this wallet"></label>
+              <button class="primary-button sticky-action" type="submit">Continue to review</button>
             </fieldset>
-          </section>
+          </form>
+        </section>
 
-          <section class="screen" data-view="setup" hidden>
-            <header class="screen-header"><h1>Wallet setup</h1><small>OPERATION 07 / LOCAL ENCRYPTED VAULT</small></header>
-            <p class="notice danger">TEST ASSETS ONLY. Never import a phrase that controls valuable funds. The LWK adapter is not installed in this scaffold.</p>
-            <div class="tabs" role="tablist">
-              <button id="create-tab" class="tab" type="button" role="tab" aria-selected="true" data-setup-target="create">CREATE NEW</button>
-              <button id="restore-tab" class="tab" type="button" role="tab" aria-selected="false" data-setup-target="restore">RESTORE PHRASE</button>
-            </div>
-            <form id="setup-form">
-              <section class="setup-pane" data-setup-pane="create">
-                <fieldset>
-                  <legend>01 / Recovery phrase</legend>
-                  <div id="generated-phrase" class="phrase-output">LWK REQUIRED — NO PHRASE GENERATED</div>
-                  <div class="form-actions"><button id="generate-phrase" type="button" disabled>GENERATE WITH LWK</button></div>
-                </fieldset>
-              </section>
-              <section class="setup-pane" data-setup-pane="restore" hidden>
-                <fieldset>
-                  <legend>01 / Existing recovery phrase</legend>
-                  <label>12, 15, 18, 21, or 24 words<textarea id="restore-phrase" disabled autocomplete="off" autocapitalize="none" spellcheck="false"></textarea></label>
-                </fieldset>
-              </section>
-              <fieldset>
-                <legend>02 / Encrypt local vault</legend>
-                <div class="form-grid">
-                  <label>Vault password <small>Minimum 12 UTF-8 bytes</small><input id="setup-password" type="password" minlength="12" maxlength="1024" disabled autocomplete="new-password"></label>
-                  <label>Repeat password<input id="setup-confirm" type="password" minlength="12" maxlength="1024" disabled autocomplete="new-password"></label>
-                </div>
-              </fieldset>
-              <fieldset>
-                <legend>03 / Chain lock</legend>
-                <label><span><input id="backup-ack" type="checkbox" disabled> I have recorded the recovery phrase offline and understand it cannot be recovered by the extension.</span></label>
-                <label><span><input id="identity-ack" type="checkbox" disabled> I verified ECX Alpha genesis <code>672af009…96fa5bcd</code>, slot 24, and explicit-only policy.</span></label>
-                <div class="form-actions"><button id="create-vault" type="submit" disabled>CREATE ENCRYPTED VAULT &gt;&gt;</button></div>
-              </fieldset>
-              <p id="setup-status" class="notice" role="status" aria-live="polite">WAITING FOR REVIEWED LWK ADAPTER.</p>
-            </form>
-          </section>
+        <section class="screen" data-view="manage" hidden>
+          <header class="view-header"><button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Asset tools</h1><p>Issue, reissue, or burn</p></div><span></span></header>
+          <button class="tool-card" type="button" data-view-link="issue"><span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span><strong>Create an asset</strong><small>Define a new asset and its initial supply</small></span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+          <fieldset class="tool-card form-tool" disabled data-chain-fieldset><span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v6h-6"/></svg></span><span><strong>Reissue an asset</strong><small>Requires a spendable reissuance token</small></span><select aria-label="Asset to reissue"><option>No verified tokens</option></select><input inputmode="numeric" placeholder="Amount" aria-label="Reissuance amount"><input placeholder="Destination" aria-label="Reissuance destination"><button class="secondary-button" type="button">Review reissuance</button></fieldset>
+          <fieldset class="tool-card form-tool danger-tool" disabled data-chain-fieldset><span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></span><span><strong>Burn an asset</strong><small>Permanently destroy an exact asset amount</small></span><select aria-label="Asset to burn"><option>No verified assets</option></select><input inputmode="numeric" placeholder="Amount" aria-label="Burn amount"><button class="danger-button" type="button">Review burn</button></fieldset>
+        </section>
 
-          <section class="screen" data-view="network" hidden>
-            <header class="screen-header"><h1>Pinned network identity</h1><small>READOUT 08 / FAIL-CLOSED</small></header>
-            <p class="notice info">This extension is bound to one chain. A mismatched genesis or native asset must stop synchronization and signing.</p>
-            <section class="box">
-              <h2 class="box-title">ECX Alpha / Elements+ V11</h2>
-              <div class="box-body">
-                <dl class="kv">
-                  <div><dt>CHAIN</dt><dd>ECX Alpha</dd></div>
-                  <div><dt>IMPLEMENTATION</dt><dd>Elements+ drivechain fork</dd></div>
-                  <div><dt>SIDECHAIN SLOT</dt><dd>24</dd></div>
-                  <div><dt>GENESIS</dt><dd class="mono-hash">672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd</dd></div>
-                  <div><dt>NATIVE ASSET</dt><dd class="mono-hash">62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4</dd></div>
-                  <div><dt>PARENT GENESIS</dt><dd class="mono-hash">000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f</dd></div>
-                  <div><dt>EXPLORER</dt><dd>explorer.bitnames.info</dd></div>
-                  <div><dt>TX POLICY</dt><dd class="orange">EXPLICIT / NON-CONFIDENTIAL ONLY</dd></div>
-                  <div><dt>DEX</dt><dd>NOT INSTALLED</dd></div>
-                </dl>
-              </div>
-            </section>
-          </section>
-        </main>
-      </div>
+        <section class="screen" data-view="setup" hidden>
+          <header class="view-header"><button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Set up wallet</h1><p>Encrypted on this device</p></div><span></span></header>
+          <p class="warning-banner">Use test assets only. Never import a phrase that controls valuable funds.</p>
+          <div class="tabs" role="tablist"><button id="create-tab" class="tab" type="button" role="tab" aria-selected="true" data-setup-target="create">Create new</button><button id="restore-tab" class="tab" type="button" role="tab" aria-selected="false" data-setup-target="restore">Import phrase</button></div>
+          <form id="setup-form" class="flow-form setup-form">
+            <section class="setup-pane" data-setup-pane="create"><div class="section-label">1 · Recovery phrase</div><div id="generated-phrase" class="phrase-output">Wallet adapter required — no phrase generated</div><button id="generate-phrase" class="secondary-button" type="button" disabled>Generate recovery phrase</button></section>
+            <section class="setup-pane" data-setup-pane="restore" hidden><div class="section-label">1 · Recovery phrase</div><label>12, 15, 18, 21, or 24 words<textarea id="restore-phrase" disabled autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Enter each word separated by a space"></textarea></label></section>
+            <div class="section-label">2 · Protect this wallet</div>
+            <label>Password <small>At least 12 UTF-8 bytes</small><input id="setup-password" type="password" minlength="12" maxlength="1024" disabled autocomplete="new-password"></label>
+            <label>Confirm password<input id="setup-confirm" type="password" minlength="12" maxlength="1024" disabled autocomplete="new-password"></label>
+            <label class="check-row"><input id="backup-ack" type="checkbox" disabled><span>I saved the recovery phrase somewhere safe and offline.</span></label>
+            <label class="check-row"><input id="identity-ack" type="checkbox" disabled><span>I verified ECX Alpha genesis <code>672af009…96fa5bcd</code>, slot 24, and explicit-only policy.</span></label>
+            <button id="create-vault" class="primary-button" type="submit" disabled>Create encrypted wallet</button>
+            <p id="setup-status" class="inline-status" role="status" aria-live="polite">Waiting for reviewed wallet adapter.</p>
+          </form>
+        </section>
 
-      <footer class="statusbar">
-        <span id="footer-status" class="status-main">BOOTING…</span>
-        <span id="footer-net">NET: CHECKING</span>
-        <span>PRIVACY: EXPLICIT</span>
-        <span id="footer-clock">--:--:-- UTC</span>
-      </footer>
+        <section class="screen" data-view="network" hidden>
+          <header class="view-header"><button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button><div><h1>Network</h1><p>Pinned chain identity</p></div><span></span></header>
+          <section class="identity-card"><div class="network-logo">E+</div><div><strong>ECX Alpha</strong><span>Elements+ drivechain fork</span></div><span class="alpha-badge">Alpha</span></section>
+          <p class="subtle-notice">This wallet fails closed if the explorer's genesis or native asset differs from the pinned identity.</p>
+          <dl class="settings-list">
+            <div><dt>Connection</dt><dd id="footer-net">Checking pins</dd></div><div><dt>Sidechain slot</dt><dd>24</dd></div><div><dt>Output policy</dt><dd>Explicit only</dd></div><div><dt>Explorer</dt><dd>explorer.bitnames.info</dd></div>
+            <div><dt>Genesis</dt><dd class="mono-hash">672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd</dd></div><div><dt>Native asset</dt><dd class="mono-hash">62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4</dd></div><div><dt>Parent genesis</dt><dd class="mono-hash">000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f</dd></div>
+            <div><dt>DEX</dt><dd>Not installed</dd></div><div><dt>Session time</dt><dd id="footer-clock">--:--:-- UTC</dd></div>
+          </dl>
+        </section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="Primary navigation">
+        <button type="button" data-view-target="dashboard" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg><span>Home</span></button>
+        <button type="button" data-view-target="assets"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9 9.5c0-1 1-1.8 3-1.8s3 .8 3 1.8-1 1.6-3 1.9-3 .9-3 2 1 1.9 3 1.9 3-.8 3-1.8M12 6v12"/></svg><span>Assets</span></button>
+        <button type="button" data-view-target="manage"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Tools</span></button>
+        <button type="button" data-view-target="network"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.64a1.7 1.7 0 0 0 1.03-1.56V3h4v.08A1.7 1.7 0 0 0 15 4.64a1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.36 9a1.7 1.7 0 0 0 1.56 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg><span>Settings</span></button>
+      </nav>
     </div>
     <script type="module" src="wallet.js"></script>
   </body>

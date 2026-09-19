@@ -7,8 +7,6 @@ const required = [
   "manifest.json",
   "src/background/service-worker.js",
   "src/network/ecx-alpha.js",
-  "src/ui/popup.html",
-  "src/ui/popup.js",
   "src/ui/wallet.html",
   "src/ui/wallet.js",
   "src/ui/preview.html",
@@ -48,6 +46,9 @@ for (const target of ["chromium", "firefox"]) {
   if (manifest.manifest_version !== 3 || manifest.permissions.join(",") !== "storage") {
     throw new Error(`${target} manifest has an unexpected permission surface`);
   }
+  if (manifest.action?.default_popup !== "src/ui/wallet.html") {
+    throw new Error(`${target} must open the reviewed wallet surface directly`);
+  }
   if (JSON.stringify(manifest.host_permissions) !== JSON.stringify(expectedHosts)) {
     throw new Error(`${target} manifest must grant only the pinned explorer host`);
   }
@@ -64,13 +65,13 @@ for (const target of ["chromium", "firefox"]) {
   ) {
     throw new Error(`${target} manifest CSP is not fail-closed`);
   }
-  for (const name of ["popup.html", "wallet.html", "preview.html"]) {
+  for (const name of ["wallet.html", "preview.html"]) {
     const html = await readFile(path.join(directory, "src", "ui", name), "utf8");
     if (/\sstyle\s*=/iu.test(html) || /<script(?![^>]*\bsrc=)[^>]*>/iu.test(html)) {
       throw new Error(`${target}/${name} contains CSP-blocked inline content`);
     }
   }
-  const css = `${await readFile(path.join(directory, "src", "ui", "wallet.css"), "utf8")}\n${await readFile(path.join(directory, "src", "ui", "popup.css"), "utf8")}`;
+  const css = await readFile(path.join(directory, "src", "ui", "wallet.css"), "utf8");
   if (/gradient\s*\(/iu.test(css)) throw new Error(`${target} UI contains a forbidden gradient`);
   const preview = await readFile(path.join(directory, "src", "ui", "preview.html"), "utf8");
   if (!preview.includes('src="preview.js"') || preview.includes('src="wallet.js"')) {

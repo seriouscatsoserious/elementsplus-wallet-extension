@@ -93,6 +93,34 @@ function assetLabel(asset: WalletSnapshot["assets"][number]): string {
   return asset.ticker ?? asset.name ?? `${asset.assetId.slice(0, 8)}…${asset.assetId.slice(-8)}`;
 }
 
+function renderAssetIdentity(
+  cell: HTMLTableCellElement,
+  asset: WalletSnapshot["assets"][number],
+): void {
+  const identity = document.createElement("span");
+  identity.className = "asset-name";
+  const icon = document.createElement("span");
+  icon.className = "token-icon";
+  icon.textContent = asset.isNative ? "E" : assetLabel(asset).slice(0, 1).toUpperCase();
+  const copy = document.createElement("span");
+  const label = document.createElement("strong");
+  label.textContent = assetLabel(asset);
+  const detail = document.createElement("small");
+  detail.textContent = asset.isNative ? "Alpha ECX" : "Issued asset";
+  copy.append(label, detail);
+  identity.append(icon, copy);
+  cell.append(identity);
+}
+
+function renderAmount(cell: HTMLTableCellElement, amount: string, caption: string): void {
+  cell.className = "amount";
+  const value = document.createElement("strong");
+  value.textContent = `${amount} atomic`;
+  const detail = document.createElement("small");
+  detail.textContent = caption;
+  cell.append(value, detail);
+}
+
 export function renderSnapshot(snapshot: WalletSnapshot): void {
   const native = snapshot.assets.find((asset) => asset.isNative);
   setText("ecx-balance", native === undefined ? "—" : `${native.amountAtomic} atomic`);
@@ -103,13 +131,11 @@ export function renderSnapshot(snapshot: WalletSnapshot): void {
   dashboard.replaceChildren();
   for (const asset of snapshot.assets) {
     const row = dashboard.insertRow();
-    const label = row.insertCell();
-    label.textContent = assetLabel(asset);
-    if (asset.isNative) label.className = "native";
-    row.insertCell().textContent = `${asset.assetId.slice(0, 8)}…${asset.assetId.slice(-8)}`;
-    const amount = row.insertCell();
-    amount.className = "amount";
-    amount.textContent = `${asset.amountAtomic} atomic`;
+    renderAssetIdentity(row.insertCell(), asset);
+    const id = row.insertCell();
+    id.className = "asset-id";
+    id.textContent = `${asset.assetId.slice(0, 8)}…${asset.assetId.slice(-8)}`;
+    renderAmount(row.insertCell(), asset.amountAtomic, "Available");
   }
   const inventory = element<HTMLTableSectionElement>("asset-inventory");
   inventory.replaceChildren();
@@ -117,33 +143,29 @@ export function renderSnapshot(snapshot: WalletSnapshot): void {
     const row = inventory.insertRow();
     row.className = "empty-row";
     const cell = row.insertCell();
-    cell.colSpan = 4;
+    cell.colSpan = 3;
     cell.textContent = "VERIFIED SYNC RETURNED NO ASSETS";
     return;
   }
   for (const asset of snapshot.assets) {
     const row = inventory.insertRow();
-    const ticker = row.insertCell();
-    ticker.textContent = assetLabel(asset);
-    if (asset.isNative) ticker.className = "native";
-    row.insertCell().textContent = asset.assetId;
-    const confirmed = row.insertCell();
-    confirmed.className = "amount";
-    confirmed.textContent = `${asset.confirmedAtomic} atomic`;
-    const available = row.insertCell();
-    available.className = "amount";
-    available.textContent = `${asset.amountAtomic} atomic`;
+    renderAssetIdentity(row.insertCell(), asset);
+    const id = row.insertCell();
+    id.className = "asset-id";
+    id.textContent = asset.assetId;
+    renderAmount(row.insertCell(), asset.amountAtomic, `${asset.confirmedAtomic} confirmed`);
   }
 }
 
 export function renderStaticPreview(): void {
-  setNotice("STATIC UI PREVIEW — NO WALLET, KEYS, ADDRESSES, BALANCES, OR NODE DATA ARE LOADED.", "info");
-  setText("vault-state", "NOT INITIALIZED");
-  setText("adapter-state", "LWK NOT CONNECTED");
-  setText("footer-status", "PREVIEW / ALL CHAIN ACTIONS DISABLED");
-  setText("footer-net", "NET: NOT QUERIED");
+  setNotice("Preview mode — no wallet, keys, addresses, balances, or node data are loaded.", "info");
+  setText("vault-state", "Not initialized");
+  setText("account-state", "Not set up");
+  setText("adapter-state", "Not connected");
+  setText("footer-status", "All chain actions disabled");
+  setText("footer-net", "Not queried");
   const badge = element("network-live");
-  badge.textContent = "NET OFFLINE";
+  badge.textContent = "Preview offline";
   badge.dataset["state"] = "idle";
   setWalletActionsEnabled({
     mnemonic: false,
