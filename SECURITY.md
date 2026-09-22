@@ -2,6 +2,12 @@
 
 This is alpha software for valueless test assets only.
 
+Preconfirmation is experimental and disabled unless an operator profile is
+explicitly provisioned in extension storage. “Preconfirmed” is an accountable
+operator promise observed through multiple relays, not consensus finality. The
+fixed-session limitations are documented in `docs/PRECONFIRMATIONS.md`; do not
+use it with valuable funds before independent review and funded-network tests.
+
 - The ECX Alpha identity pins are compiled into the extension. Explorer data is
   displayed only when its height-zero hash and policy asset match those pins.
   This detects accidental misconfiguration; it does not authenticate a

@@ -24,6 +24,7 @@ export interface PreparedSendApproval {
 
 export interface BroadcastTransactionResult {
   readonly txid: string;
+  readonly settlement: "broadcast" | "preconfirmed";
 }
 
 export class SendFlowValidationError extends Error {
@@ -147,8 +148,9 @@ export function parsePreparedSendApproval(
 }
 
 export function parseBroadcastTransactionResult(value: unknown): BroadcastTransactionResult {
-  if (!isPlainRecord(value) || !hasExactKeys(value, ["txid"]) || typeof value["txid"] !== "string" || !HASH_32_BYTES.test(value["txid"])) {
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["txid", "settlement"]) || typeof value["txid"] !== "string" || !HASH_32_BYTES.test(value["txid"])
+    || (value["settlement"] !== "broadcast" && value["settlement"] !== "preconfirmed")) {
     fail("Broadcast response contains a malformed transaction ID");
   }
-  return Object.freeze({ txid: value["txid"] });
+  return Object.freeze({ txid: value["txid"], settlement: value["settlement"] });
 }

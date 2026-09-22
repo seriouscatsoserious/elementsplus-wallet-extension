@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +18,11 @@ if (compilation.status !== 0) {
   process.stderr.write(compilation.stderr);
   process.exit(compilation.status ?? 1);
 }
+await mkdir(path.join(output, "src", "preconf"), { recursive: true });
+await copyFile(
+  path.join(root, "vendor", "elementsplus-preconf", "client", "monitor.mjs"),
+  path.join(output, "src", "preconf", "monitor.js"),
+);
 
 const testDirectory = path.join(output, "test", "unit");
 const testFiles = (await readdir(testDirectory))

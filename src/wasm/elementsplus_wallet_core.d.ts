@@ -10,6 +10,7 @@ export function initSync(module: { readonly module: BufferSource | WebAssembly.M
 
 export function generate_mnemonic(): string;
 export function validate_mnemonic(mnemonic: string): boolean;
+export function verify_preconfirmation_receipt(configJson: string, receiptJson: string): boolean;
 
 export class WasmWalletCore {
   constructor(mnemonic: string);
