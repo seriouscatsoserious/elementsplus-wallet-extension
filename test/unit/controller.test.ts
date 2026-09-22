@@ -8,9 +8,10 @@ import type {
   LwkWalletSession,
   PreparedTransaction,
   ReissueDraft,
+  SignedTransaction,
   TransferDraft,
 } from "../../src/adapters/lwk.js";
-import { validateWalletSnapshot, WalletController } from "../../src/background/controller.js";
+import { validateWalletSnapshot, WalletController, type PreconfirmationClient } from "../../src/background/controller.js";
 import { ECX_ALPHA_IDENTITY, type EcxAlphaIdentity } from "../../src/network/identity.js";
 import type { ExtensionStorageArea } from "../../src/platform/browser.js";
 import { encryptVault, VaultStore, type WalletVaultPayload } from "../../src/vault.js";
@@ -77,11 +78,12 @@ class FakeSession implements LwkWalletSession {
   async prepareIssue(_draft: IssueDraft): Promise<PreparedTransaction> { throw new Error("not used"); }
   async prepareReissue(_draft: ReissueDraft): Promise<PreparedTransaction> { throw new Error("not used"); }
   async prepareBurn(_draft: BurnDraft): Promise<PreparedTransaction> { throw new Error("not used"); }
-  async signAndBroadcast(transaction: PreparedTransaction): Promise<string> {
+  async signPrepared(transaction: PreparedTransaction): Promise<SignedTransaction> {
     this.signCalls += 1;
     this.lastSigned = transaction;
-    return "1".repeat(64);
+    return { txid: "1".repeat(64), rawTransactionHex: "00" };
   }
+  async broadcastSigned(transaction: SignedTransaction): Promise<string> { return transaction.txid; }
   destroy(): void { this.destroyed += 1; }
 }
 
@@ -185,7 +187,7 @@ const TEST_RECEIVE_ADDRESS = "elements1qw508d6qejxtdg4y5r3zarvary0c5xw7kfmp4zh";
 
 async function unlockedController(
   adapter: FakeAdapter = new FakeAdapter(),
-  options: { readonly now?: () => Date; readonly approvalTimeoutMilliseconds?: number } = {},
+  options: { readonly now?: () => Date; readonly approvalTimeoutMilliseconds?: number; readonly preconfirmation?: PreconfirmationClient } = {},
 ): Promise<{ readonly controller: WalletController; readonly adapter: FakeAdapter }> {
   const store = new VaultStore(new MemoryStorage());
   await store.write(await encryptVault(payload, "a sufficiently long password"));
@@ -196,6 +198,7 @@ async function unlockedController(
     ...(options.approvalTimeoutMilliseconds === undefined
       ? {}
       : { approvalTimeoutMilliseconds: options.approvalTimeoutMilliseconds }),
+    ...(options.preconfirmation === undefined ? {} : { preconfirmation: options.preconfirmation }),
   });
   assert.equal((await controller.handle({
     type: "wallet.unlock",
@@ -205,6 +208,34 @@ async function unlockedController(
 }
 
 describe("wallet controller", () => {
+  it("routes an enabled fixed-session send through preconfirmation", async () => {
+    let calls = 0;
+    const preconfirmation: PreconfirmationClient = {
+      async isEnabled() { return true; },
+      async requiredInput() { return `${"a".repeat(64)}:0`; },
+      async preconfirm(transaction) { calls += 1; return { txid: transaction.txid }; },
+      disconnect() {},
+    };
+    const { controller } = await unlockedController(new FakeAdapter(), { preconfirmation });
+    const prepared = await controller.handle({
+      type: "transaction.prepare-send",
+      assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+      destination: TEST_RECEIVE_ADDRESS,
+      amountAtomic: "1000",
+      feeRate: "1",
+    });
+    assert.equal(prepared.ok, true);
+    if (!prepared.ok) return;
+    const sent = await controller.handle({
+      type: "transaction.approve-and-broadcast",
+      approvalToken: prepared.result.approvalToken,
+      summaryHash: prepared.result.summaryHash,
+    });
+    assert.deepEqual(sent, { ok: true, result: { txid: "1".repeat(64), settlement: "preconfirmed" } });
+    assert.equal(calls, 1);
+    await controller.handle({ type: "wallet.lock" });
+  });
+
   it("rejects surplus message fields", async () => {
     const controller = new WalletController({ vaultStore: new VaultStore(new MemoryStorage()), adapter: new FakeAdapter() });
     const response = await controller.handle({ type: "wallet.status", surprise: true });
@@ -293,7 +324,7 @@ describe("wallet controller", () => {
       approvalToken: prepared.result.approvalToken,
       summaryHash: prepared.result.summaryHash,
     });
-    assert.deepEqual(broadcast, { ok: true, result: { txid: "1".repeat(64) } });
+    assert.deepEqual(broadcast, { ok: true, result: { txid: "1".repeat(64), settlement: "broadcast" } });
     assert.equal(adapter.session.signCalls, 1);
     assert.equal(adapter.session.lastSigned?.pset, "cHNldP8=");
     assert.equal(adapter.session.lastSigned?.coreReviewHash, "2".repeat(64));

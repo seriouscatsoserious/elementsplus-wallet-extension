@@ -387,11 +387,15 @@ element<HTMLButtonElement>("approve-broadcast").addEventListener("click", () => 
         summaryHash: approval.summaryHash,
       })));
       setText("broadcast-txid", result.txid);
-      setText("post-broadcast-status", "Refreshing the explorer-backed wallet snapshot…");
+      setText("post-broadcast-status", result.settlement === "preconfirmed"
+        ? "Preconfirmed by the bonded operator. Waiting for block settlement…"
+        : "Broadcast. Refreshing the explorer-backed wallet snapshot…");
       showView("sent");
       try {
         await synchronizeWalletSnapshot();
-        setText("post-broadcast-status", "Wallet snapshot refreshed. Explorer state may lag until relay or confirmation.");
+        setText("post-broadcast-status", result.settlement === "preconfirmed"
+          ? "Preconfirmed by the bonded operator. Block confirmation is still pending."
+          : "Wallet snapshot refreshed. Explorer state may lag until relay or confirmation.");
       } catch {
         setText("post-broadcast-status", "Transaction ID retained. Snapshot refresh failed; check the explorer before retrying anything.");
       }

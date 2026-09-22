@@ -93,10 +93,10 @@ describe("wallet send UI boundary", () => {
   });
 
   it("validates a broadcast transaction ID and rejects extra response data", () => {
-    assert.deepEqual(parseBroadcastTransactionResult({ txid: "c".repeat(64) }), { txid: "c".repeat(64) });
-    assert.throws(() => parseBroadcastTransactionResult({ txid: "nope" }), SendFlowValidationError);
+    assert.deepEqual(parseBroadcastTransactionResult({ txid: "c".repeat(64), settlement: "preconfirmed" }), { txid: "c".repeat(64), settlement: "preconfirmed" });
+    assert.throws(() => parseBroadcastTransactionResult({ txid: "nope", settlement: "broadcast" }), SendFlowValidationError);
     assert.throws(
-      () => parseBroadcastTransactionResult({ txid: "c".repeat(64), rawTransaction: "00" }),
+      () => parseBroadcastTransactionResult({ txid: "c".repeat(64), settlement: "broadcast", rawTransaction: "00" }),
       SendFlowValidationError,
     );
   });

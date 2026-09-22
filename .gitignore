@@ -4,3 +4,6 @@ dist/
 .wasm-bindgen/
 .test-build/
 .live-smoke-build/
+services/preconfer-signer/target/
+services/preconfer-signer/state/
+services/preconfer-signer/*.secret

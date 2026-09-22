@@ -253,10 +253,12 @@ describe("Elements+ WASM adapter", () => {
     assert.equal(prepared.pset, "cHNldP8=");
     assert.equal(prepared.coreReviewHash, REVIEW_HASH);
     assert.equal(prepared.summary.networkFeeAtomic, "344");
-    assert.equal(await session.signAndBroadcast(prepared), SIGNED_TXID);
+    const signed = await session.signPrepared(prepared);
+    assert.equal(signed.txid, SIGNED_TXID);
+    assert.equal(await session.broadcastSigned(signed), SIGNED_TXID);
     assert.equal(opened?.signCalls, 1);
     assert.equal(broadcastCalls, 1);
-    await assert.rejects(session.signAndBroadcast(prepared), /already consumed/u);
+    await assert.rejects(session.signPrepared(prepared), /already consumed/u);
     assert.equal(opened?.signCalls, 1);
     session.destroy();
   });
@@ -279,7 +281,8 @@ describe("Elements+ WASM adapter", () => {
       feeRate: "1",
       explicitOutputsOnly: true,
     });
-    await assert.rejects(session.signAndBroadcast(prepared), /different transaction id/u);
+    const signed = await session.signPrepared(prepared);
+    await assert.rejects(session.broadcastSigned(signed), /different transaction id/u);
     session.destroy();
   });
 });

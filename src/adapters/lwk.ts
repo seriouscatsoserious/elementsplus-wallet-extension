@@ -97,13 +97,19 @@ export interface PreparedTransaction {
   readonly summary: TransferSummary;
 }
 
+export interface SignedTransaction {
+  readonly rawTransactionHex: string;
+  readonly txid: string;
+}
+
 export interface LwkWalletSession {
   sync(signal: AbortSignal): Promise<WalletSnapshot>;
-  prepareTransfer(draft: TransferDraft): Promise<PreparedTransaction>;
+  prepareTransfer(draft: TransferDraft, requiredInput?: string): Promise<PreparedTransaction>;
   prepareIssue(draft: IssueDraft): Promise<PreparedTransaction>;
   prepareReissue(draft: ReissueDraft): Promise<PreparedTransaction>;
   prepareBurn(draft: BurnDraft): Promise<PreparedTransaction>;
-  signAndBroadcast(transaction: PreparedTransaction): Promise<string>;
+  signPrepared(transaction: PreparedTransaction): Promise<SignedTransaction>;
+  broadcastSigned(transaction: SignedTransaction): Promise<string>;
   destroy(): void;
 }
 

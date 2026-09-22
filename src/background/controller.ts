@@ -2,6 +2,7 @@ import type {
   LwkWalletAdapter,
   LwkWalletSession,
   PreparedTransaction,
+  SignedTransaction,
   TransferDraft,
   TransferSummary,
   WalletAsset,
@@ -41,6 +42,14 @@ export interface PreparedSendApproval {
 
 export interface BroadcastTransactionResult {
   readonly txid: string;
+  readonly settlement: "broadcast" | "preconfirmed";
+}
+
+export interface PreconfirmationClient {
+  isEnabled(): Promise<boolean>;
+  requiredInput(): Promise<string>;
+  preconfirm(transaction: SignedTransaction): Promise<{ readonly txid: string }>;
+  disconnect(): void;
 }
 
 interface ControllerDependencies {
@@ -51,6 +60,7 @@ interface ControllerDependencies {
   readonly autoLockMilliseconds?: number;
   readonly syncTimeoutMilliseconds?: number;
   readonly approvalTimeoutMilliseconds?: number;
+  readonly preconfirmation?: PreconfirmationClient;
 }
 
 export const DEFAULT_AUTO_LOCK_MILLISECONDS = 5 * 60 * 1_000;
@@ -68,6 +78,7 @@ interface PendingApproval {
   readonly expiresAtMilliseconds: number;
   readonly transaction: PreparedTransaction;
   readonly session: LwkWalletSession;
+  readonly preconfirmation: boolean;
 }
 
 class CapabilityUnavailableError extends Error {
@@ -343,6 +354,7 @@ export class WalletController {
   readonly #autoLockMilliseconds: number;
   readonly #syncTimeoutMilliseconds: number;
   readonly #approvalTimeoutMilliseconds: number;
+  readonly #preconfirmation: PreconfirmationClient | undefined;
   #session: LwkWalletSession | undefined;
   #pendingApproval: PendingApproval | undefined;
   #lastActivityMilliseconds = 0;
@@ -357,6 +369,7 @@ export class WalletController {
     this.#autoLockMilliseconds = dependencies.autoLockMilliseconds ?? DEFAULT_AUTO_LOCK_MILLISECONDS;
     this.#syncTimeoutMilliseconds = dependencies.syncTimeoutMilliseconds ?? DEFAULT_SYNC_TIMEOUT_MILLISECONDS;
     this.#approvalTimeoutMilliseconds = dependencies.approvalTimeoutMilliseconds ?? DEFAULT_APPROVAL_TIMEOUT_MILLISECONDS;
+    this.#preconfirmation = dependencies.preconfirmation;
     if (!Number.isSafeInteger(this.#autoLockMilliseconds) || this.#autoLockMilliseconds < 1_000) {
       throw new ValidationError("auto-lock interval is invalid");
     }
@@ -461,7 +474,9 @@ export class WalletController {
             feeRate: feeRate(raw["feeRate"]),
             explicitOutputsOnly: true,
           });
-          const transaction = validatePreparedTransfer(await this.#session.prepareTransfer(draft), draft);
+          const usesPreconfirmation = this.#preconfirmation !== undefined && await this.#preconfirmation.isEnabled();
+          const requiredInput = usesPreconfirmation ? await this.#preconfirmation!.requiredInput() : undefined;
+          const transaction = validatePreparedTransfer(await this.#session.prepareTransfer(draft, requiredInput), draft);
           const hash = await transactionSummaryHash(this.#crypto, transaction);
           const token = randomApprovalToken(this.#crypto);
           const expiresAtMilliseconds = this.#now().getTime() + this.#approvalTimeoutMilliseconds;
@@ -472,6 +487,7 @@ export class WalletController {
             expiresAtMilliseconds,
             transaction,
             session: this.#session,
+            preconfirmation: usesPreconfirmation,
           });
           this.#touch();
           return {
@@ -499,10 +515,16 @@ export class WalletController {
             || !fixedLengthEqual(pending.token, requestedToken)
             || !fixedLengthEqual(pending.summaryHash, requestedHash)
           ) throw new ValidationError("transaction approval is expired, invalid, or already used");
-          const txid = await pending.session.signAndBroadcast(pending.transaction);
+          const signed = await pending.session.signPrepared(pending.transaction);
+          if (!/^[0-9a-f]{64}$/u.test(signed.txid)) throw new ValidationError("wallet adapter returned a malformed transaction id");
+          const usesPreconfirmation = pending.preconfirmation;
+          const txid = usesPreconfirmation
+            ? (await this.#preconfirmation!.preconfirm(signed)).txid
+            : await pending.session.broadcastSigned(signed);
           if (!/^[0-9a-f]{64}$/u.test(txid)) throw new ValidationError("wallet adapter returned a malformed transaction id");
+          if (txid !== signed.txid) throw new ValidationError("transaction service returned a different transaction id");
           this.#touch();
-          return { ok: true, result: Object.freeze({ txid }) };
+          return { ok: true, result: Object.freeze({ txid, settlement: usesPreconfirmation ? "preconfirmed" : "broadcast" }) };
         }
         default:
           throw new ValidationError("wallet request type is unsupported");
@@ -559,6 +581,7 @@ export class WalletController {
     if (this.#autoLockTimer !== undefined) clearTimeout(this.#autoLockTimer);
     this.#autoLockTimer = undefined;
     this.#session?.destroy();
+    this.#preconfirmation?.disconnect();
     this.#session = undefined;
     this.#pendingApproval = undefined;
     this.#lastActivityMilliseconds = 0;

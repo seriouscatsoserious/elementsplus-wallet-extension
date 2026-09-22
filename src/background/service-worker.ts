@@ -2,9 +2,11 @@ import { ElementsPlusWasmAdapter } from "../adapters/elementsplus-wasm.js";
 import { WalletController } from "./controller.js";
 import { getExtensionApi, restrictStorage } from "../platform/browser.js";
 import { VaultStore } from "../vault.js";
+import { StoredPreconfirmationClient } from "../preconf/client.js";
 import initWalletCore, {
   generate_mnemonic,
   validate_mnemonic,
+  verify_preconfirmation_receipt,
   WasmWalletCore,
 } from "../wasm/elementsplus_wallet_core.js";
 
@@ -25,6 +27,10 @@ const loadWalletCore = async () => {
 const controller = new WalletController({
   vaultStore: new VaultStore(api.storage.local),
   adapter: new ElementsPlusWasmAdapter({ loadCore: loadWalletCore }),
+  preconfirmation: new StoredPreconfirmationClient(
+    api.storage.local,
+    (config, receipt) => verify_preconfirmation_receipt(config, receipt),
+  ),
 });
 
 api.runtime.onMessage.addListener((message, sender, sendResponse) => {

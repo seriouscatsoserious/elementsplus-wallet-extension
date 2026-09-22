@@ -6,6 +6,7 @@ import type {
   LwkWalletSession,
   PreparedTransaction,
   ReissueDraft,
+  SignedTransaction,
   TransferDraft,
   WalletAsset,
   WalletSnapshot,
@@ -482,7 +483,7 @@ class ElementsPlusWasmSession implements LwkWalletSession {
     return this.#snapshot(scan);
   }
 
-  async prepareTransfer(draft: TransferDraft): Promise<PreparedTransaction> {
+  async prepareTransfer(draft: TransferDraft, requiredInput?: string): Promise<PreparedTransaction> {
     this.#assertOpen();
     if (!draft.explicitOutputsOnly || draft.assetId !== ECX_ALPHA_IDENTITY.nativeAssetId) {
       fail("this wallet currently sends only explicit native ECX");
@@ -498,7 +499,11 @@ class ElementsPlusWasmSession implements LwkWalletSession {
     this.#assertOpen();
     const nativeUtxos = scan.utxos.filter((utxo) =>
       utxo.assetId === ECX_ALPHA_IDENTITY.nativeAssetId
+      && (requiredInput === undefined || `${utxo.txid}:${utxo.vout}` === requiredInput)
     );
+    if (requiredInput !== undefined && nativeUtxos.length !== 1) {
+      fail("configured preconfirmation principal is not an unspent wallet output");
+    }
     const fee = estimateFee(nativeUtxos, amount, draft.feeRate);
     if (fee > MAX_SAFE_ATOMIC) fail("network fee exceeds the current browser signing boundary");
     const changeState = scan.scan.chains.find((chain) => chain.chain === "change");
@@ -526,6 +531,7 @@ class ElementsPlusWasmSession implements LwkWalletSession {
       || prepared.review.recipient !== draft.destination
       || prepared.review.amount !== request.amount
       || prepared.review.fee !== request.fee
+      || (requiredInput !== undefined && (prepared.review.selectedOutpoints.length !== 1 || prepared.review.selectedOutpoints[0] !== requiredInput))
     ) fail("wallet core review does not match the requested transfer");
 
     // The controller itself permits only one pending approval; mirror that
@@ -562,7 +568,7 @@ class ElementsPlusWasmSession implements LwkWalletSession {
     return fail("asset burning is not implemented by this wallet core");
   }
 
-  async signAndBroadcast(transaction: PreparedTransaction): Promise<string> {
+  async signPrepared(transaction: PreparedTransaction): Promise<SignedTransaction> {
     this.#assertOpen();
     const key = `${transaction.coreReviewHash}:${transaction.pset}`;
     let preparedJson = this.#prepared.get(key);
@@ -578,10 +584,23 @@ class ElementsPlusWasmSession implements LwkWalletSession {
       if (signed.reviewHash !== transaction.coreReviewHash) {
         fail("signed transaction review commitment changed");
       }
-      return await this.#broadcast(signed);
+      return Object.freeze({ rawTransactionHex: signed.rawTransactionHex, txid: signed.txid });
     } finally {
       preparedJson = "";
     }
+  }
+
+  async broadcastSigned(transaction: SignedTransaction): Promise<string> {
+    if (!HEX_32_BYTES.test(transaction.txid)
+      || !EVEN_LOWER_HEX.test(transaction.rawTransactionHex)
+      || transaction.rawTransactionHex.length > 8 * 1024 * 1024) {
+      fail("signed transaction is malformed");
+    }
+    return await this.#broadcast({
+      rawTransactionHex: transaction.rawTransactionHex,
+      txid: transaction.txid,
+      reviewHash: "0".repeat(64),
+    });
   }
 
   destroy(): void {

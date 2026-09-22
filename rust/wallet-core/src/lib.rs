@@ -1038,6 +1038,25 @@ mod wasm {
         WalletCore::generate_mnemonic().map_err(js_error)
     }
 
+    /// Verify a receipt against an operator configuration that was provisioned
+    /// locally with the extension. The signer never supplies this trust root.
+    #[wasm_bindgen]
+    pub fn verify_preconfirmation_receipt(
+        config_json: &str,
+        receipt_json: &str,
+    ) -> Result<bool, JsValue> {
+        let config: elementsplus_preconf::operator::Config = serde_json::from_str(config_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid operator config: {e}")))?;
+        let receipt: elementsplus_preconf::operator::Receipt =
+            serde_json::from_str(receipt_json)
+                .map_err(|e| JsValue::from_str(&format!("invalid receipt: {e}")))?;
+        config
+            .compile()
+            .and_then(|bond| bond.verify(&receipt))
+            .map_err(|e| JsValue::from_str(&e))?;
+        Ok(true)
+    }
+
     fn js_error(error: WalletError) -> JsValue {
         JsValue::from_str(&error.to_string())
     }

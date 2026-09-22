@@ -1,0 +1,16 @@
+{
+  "listen": "127.0.0.1:8788",
+  "allowed_origins": ["chrome-extension://REPLACE_WITH_EXTENSION_ID"],
+  "profile_path": "./profile.json",
+  "secret_key_path": "./preconfer.secret",
+  "auth_token_path": "./wallet.secret",
+  "decision_journal": "./state/signer.journal",
+  "node_cli": {
+    "program": "/usr/local/bin/elements-cli",
+    "args": ["-datadir=/var/lib/elementsplus"]
+  },
+  "relay_urls": [
+    "wss://relay-one.example.invalid/preconf",
+    "wss://relay-two.example.invalid/preconf"
+  ]
+}

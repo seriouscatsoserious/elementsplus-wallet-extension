@@ -4,6 +4,11 @@ An experimental browser-extension wallet for the ECX Alpha Elements+ drivechain
 fork. It is **not** a Liquid wallet and never falls back to Liquid, Elements
 regtest, or another chain.
 
+The `feat/preconf-wallet-signer` branch also contains an opt-in fixed-session
+bonded-preconfirmation integration and operator signer. See
+[`docs/PRECONFIRMATIONS.md`](docs/PRECONFIRMATIONS.md). Without a provisioned
+profile, the existing explorer-broadcast behavior is unchanged.
+
 The extension packages a pinned Rust/LWK-derived WASM core. It generates and
 validates BIP39 mnemonics locally, derives explicit P2WPKH addresses, discovers
 HD-wallet activity through the pinned explorer, locally consensus-decodes every
