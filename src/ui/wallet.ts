@@ -209,8 +209,14 @@ function configureSetup(status: WalletStatus): void {
 async function refreshStatus(): Promise<void> {
   const status = parseStatus(unwrap(await sendExtensionMessage({ type: "wallet.status" })));
   statusCache = status;
+  document.body.dataset["walletState"] = !status.initialized ? "setup" : status.unlocked ? "ready" : "locked";
+  if (!status.initialized) showView("setup");
+  else if (!status.unlocked) showView("dashboard");
   setText("vault-state", status.initialized ? (status.unlocked ? "Unlocked" : "Locked") : "Not initialized");
   setText("account-state", status.initialized ? (status.unlocked ? "Unlocked" : "Locked") : "Not set up");
+  const accountState = element<HTMLButtonElement>("account-state");
+  accountState.dataset["viewLink"] = status.initialized ? "dashboard" : "setup";
+  accountState.disabled = status.initialized;
   setText("adapter-state", status.adapter.available ? status.adapter.implementation : "Not installed");
   setText("footer-status", status.adapter.available ? (status.unlocked ? "Auto-lock active" : "Wallet locked") : "Chain actions disabled");
   const unlockInput = element<HTMLInputElement>("unlock-password");
@@ -226,12 +232,20 @@ async function refreshStatus(): Promise<void> {
     latestSnapshot = undefined;
     clearPendingApproval(status.unlocked ? "Explicit transfers are unavailable." : "Wallet locked; approval cleared.");
   }
+  if (!status.unlocked) {
+    setText("ecx-balance", "—");
+    setText("balance-caption", "Unlock to view your balance");
+    setText("receive-address", "—");
+    element<HTMLTableSectionElement>("dashboard-assets").replaceChildren();
+    element<HTMLTableSectionElement>("asset-inventory").replaceChildren();
+  }
   if (!status.adapter.available) {
     setNotice("Wallet engine not installed. Keys, addresses, balances, and transactions remain disabled.", "danger");
   } else if (!status.initialized) {
     setNotice("No local wallet yet. Create or import a disposable ECX Alpha wallet to continue.", "info");
   } else if (!status.unlocked) {
-    setNotice("Wallet locked. It locks again after five minutes without activity.");
+    setNotice("Wallet locked. Enter your password to continue.");
+    unlockInput.focus();
   } else {
     setNotice("Wallet unlocked. Synchronizing explorer-backed explicit UTXOs…", "success");
     await synchronizeWalletSnapshot();
