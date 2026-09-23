@@ -25,6 +25,7 @@
 
       <main class="app-content">
         <section class="screen home-screen" data-view="dashboard">
+          <div class="locked-intro"><span class="locked-mark" aria-hidden="true">E+</span><h1>Welcome back</h1><p>Unlock your wallet to continue.</p></div>
           <div class="account-row">
             <div><span class="eyebrow">My wallet</span><strong>ECX Alpha account</strong></div>
             <button id="account-state" class="account-chip" type="button" data-view-link="setup">Not set up</button>
@@ -39,8 +40,6 @@
           <div class="quick-actions" aria-label="Wallet actions">
             <button type="button" data-view-link="send" data-wallet-action="send" disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 17 10-10M8 7h9v9"/></svg></span><span>Send</span></button>
             <button type="button" data-view-link="receive" data-wallet-action="receive" disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 7-10 10M16 17H7V8"/></svg></span><span>Receive</span></button>
-            <button type="button" data-view-link="issue" data-wallet-action="issue" disabled><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span>Issue</span></button>
-            <button type="button" data-view-link="manage"><span class="action-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/></svg></span><span>More</span></button>
           </div>
 
           <p id="runtime-notice" class="notice" role="status">Initializing extension…</p>
@@ -48,7 +47,6 @@
           <section class="content-card asset-card">
             <div class="card-tabs">
               <button type="button" class="card-tab active" data-view-link="assets">Assets</button>
-              <button type="button" class="card-tab" disabled>Activity</button>
               <button type="button" class="text-button" data-view-link="assets">View all</button>
             </div>
             <table class="asset-table">
@@ -67,7 +65,6 @@
             <form id="unlock-form" class="unlock-form">
               <label><span class="visually-hidden">Vault password</span><input id="unlock-password" type="password" maxlength="1024" autocomplete="current-password" placeholder="Vault password" disabled></label>
               <button id="unlock-wallet" class="primary-button compact" type="submit" disabled>Unlock</button>
-              <button id="lock-wallet" class="secondary-button compact" type="button" disabled>Lock</button>
             </form>
             <div class="access-meta"><span>Signer <strong id="adapter-state">Checking</strong></span><span id="footer-status">Starting…</span></div>
           </section>
@@ -79,7 +76,6 @@
           <header class="view-header">
             <button type="button" class="back-button" data-view-link="dashboard" aria-label="Back to wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
             <div><h1>Assets</h1><p>Your explicit ECX Alpha assets</p></div>
-            <button type="button" class="icon-button small" data-view-link="issue" aria-label="Issue an asset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
           </header>
           <div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>Search assets</span></div>
           <p class="subtle-notice">Balances appear only after the wallet adapter verifies this exact chain and synchronizes explicit UTXOs.</p>
@@ -202,13 +198,13 @@
             <div><dt>Genesis</dt><dd class="mono-hash">672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd</dd></div><div><dt>Native asset</dt><dd class="mono-hash">62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4</dd></div><div><dt>Parent genesis</dt><dd class="mono-hash">000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f</dd></div>
             <div><dt>DEX</dt><dd>Not installed</dd></div><div><dt>Session time</dt><dd id="footer-clock">--:--:-- UTC</dd></div>
           </dl>
+          <button id="lock-wallet" class="secondary-button settings-lock" type="button" disabled>Lock wallet</button>
         </section>
       </main>
 
       <nav class="bottom-nav" aria-label="Primary navigation">
         <button type="button" data-view-target="dashboard" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg><span>Home</span></button>
         <button type="button" data-view-target="assets"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9 9.5c0-1 1-1.8 3-1.8s3 .8 3 1.8-1 1.6-3 1.9-3 .9-3 2 1 1.9 3 1.9 3-.8 3-1.8M12 6v12"/></svg><span>Assets</span></button>
-        <button type="button" data-view-target="manage"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Tools</span></button>
         <button type="button" data-view-target="network"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.64a1.7 1.7 0 0 0 1.03-1.56V3h4v.08A1.7 1.7 0 0 0 15 4.64a1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.36 9a1.7 1.7 0 0 0 1.56 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg><span>Settings</span></button>
       </nav>
     </div>

@@ -29,6 +29,7 @@ export function showView(view: ViewName): void {
     if (button.dataset["viewTarget"] === view) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   }
+  document.querySelector<HTMLElement>(".app-content")?.scrollTo(0, 0);
   history.replaceState(null, "", `#${view}`);
 }
 
