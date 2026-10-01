@@ -170,6 +170,8 @@ enum OfferCommand {
     },
     /// List this wallet's offers.
     List,
+    /// (Re-)post an already signed local offer to the DEX.
+    Post { outpoint: String },
     /// Cancel an offer by spending its output back to self.
     Cancel {
         outpoint: String,
@@ -275,11 +277,19 @@ fn create_wallet(home: &Home, mnemonic: &str) -> Result<Value> {
     Ok(out)
 }
 
-/// Exit codes: 0 ok, 1 error, 3 approval required, 4 refused by policy.
+/// Exit codes: 0 ok, 1 error, 3 approval required, 4 refused by policy,
+/// 5 signed/broadcast but posting to the DEX/registry failed.
 fn exit_code(value: &Value) -> u8 {
     match value["status"].as_str() {
         Some("approval_required") => 3,
         Some("refused") => 4,
+        Some("completed")
+            if value["results"].as_array().into_iter().flatten().any(|r| {
+                r.get("post_error").is_some() || r.get("registration_error").is_some()
+            }) =>
+        {
+            5
+        }
         _ => 0,
     }
 }
@@ -349,17 +359,25 @@ fn human(value: &Value) -> String {
             line("no funds".into());
         }
         for b in balances {
-            let name = b["ticker"].as_str().map(str::to_owned).unwrap_or_else(|| {
-                format!(
+            let name = match (
+                b["ticker"].as_str(),
+                b["name"].as_str(),
+                b["verified"].as_bool(),
+            ) {
+                (Some(ticker), _, _) => ticker.to_owned(),
+                (None, Some(name), Some(true)) => {
+                    format!("{name} ({})", b["asset_id"].as_str().unwrap_or_default())
+                }
+                _ => format!(
                     "{} [UNVERIFIED]",
                     b["asset_id"].as_str().unwrap_or_default()
-                )
-            });
+                ),
+            };
             line(format!(
                 "{:>24} {name}  (unconfirmed {}, in offers {})",
                 b["display"].as_str().unwrap_or_default(),
-                b["unconfirmed"].as_str().unwrap_or("0"),
-                b["in_open_offers"].as_str().unwrap_or("0"),
+                b["unconfirmed_display"].as_str().unwrap_or("0"),
+                b["in_open_offers_display"].as_str().unwrap_or("0"),
             ));
         }
     } else if let Some(txs) = value["transactions"].as_array() {
@@ -493,6 +511,9 @@ fn run(cli: &Cli) -> Result<Value> {
             opts.exec(),
         )?,
         Command::Offer(OfferCommand::List) => open(Origin::Cli)?.offer_list()?,
+        Command::Offer(OfferCommand::Post { outpoint }) => {
+            open(Origin::Cli)?.offer_post(outpoint)?
+        }
         Command::Offer(OfferCommand::Cancel { outpoint, opts }) => {
             open(Origin::Cli)?.offer_cancel(outpoint, opts.fee_rate, opts.exec())?
         }

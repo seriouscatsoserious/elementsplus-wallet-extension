@@ -407,6 +407,8 @@ impl Wallet {
                     "unconfirmed": t.unconfirmed.to_string(),
                     "in_open_offers": t.in_offers.to_string(),
                     "display": format_amount(total, label.precision),
+                    "unconfirmed_display": format_amount(t.unconfirmed, label.precision),
+                    "in_open_offers_display": format_amount(t.in_offers, label.precision),
                     "utxos": t.utxos,
                 })
             })
@@ -503,8 +505,21 @@ impl Wallet {
     /// A review enriched with human-readable lines.
     pub fn describe_review(&self, review: &TxReview) -> Value {
         let mut lines = vec![format!("kind: {:?}", review.kind)];
+        let issued: Vec<&str> = review
+            .issuance
+            .iter()
+            .flat_map(|i| std::iter::once(i.asset_id.as_str()).chain(i.token_id.as_deref()))
+            .collect();
         for delta in &review.balance_changes {
             let label = self.label(&delta.asset_id);
+            if !label.verified && issued.contains(&delta.asset_id.as_str()) {
+                lines.push(format!(
+                    "balance: +{} atomic of newly issued {}",
+                    delta.amount.trim_start_matches('+'),
+                    delta.asset_id
+                ));
+                continue;
+            }
             lines.push(format!(
                 "balance: {} {}{}",
                 format_signed(&delta.amount, label.precision),
@@ -1280,6 +1295,48 @@ impl Wallet {
         }
         self.save_state()?;
         Ok(json!({ "offers": rows, "dex": self.dex.base(), "dex_error": dex_error }))
+    }
+
+    /// POST an already signed local offer to the DEX (e.g. after a failed
+    /// post). No signing happens here, but the DEX allowlist still applies.
+    pub fn offer_post(&self, outpoint: &str) -> Result<Value> {
+        let offer = self
+            .state
+            .borrow()
+            .offers
+            .iter()
+            .find(|o| o.outpoint == outpoint && o.status == "open")
+            .cloned()
+            .ok_or_else(|| anyhow!("no open local offer {outpoint}"))?;
+        let policy = self.policy()?;
+        let decision = policy::evaluate(
+            &policy,
+            &[],
+            &policy::Request {
+                reviews: &[],
+                policy_asset: &self.policy_asset,
+                genesis_hash: &self.genesis_hash,
+                dex_url: Some(&self.config.dex_url),
+            },
+            audit::now(),
+        );
+        if let Some(v) = decision.violations.iter().find(|v| v.contains("DEX")) {
+            bail!("refused by policy: {v}");
+        }
+        let record = self.dex.post_offer(&offer.offer, &offer.outpoint)?;
+        if let Some(o) = self
+            .state
+            .borrow_mut()
+            .offers
+            .iter_mut()
+            .find(|o| o.outpoint == outpoint)
+        {
+            o.posted = true;
+        }
+        self.save_state()?;
+        Ok(
+            json!({ "outpoint": outpoint, "posted": { "id": record["id"], "status": record["status"] }, "dex": self.dex.base() }),
+        )
     }
 
     pub fn offer_cancel(&self, outpoint: &str, fee_rate: Option<u64>, exec: Exec) -> Result<Value> {
