@@ -221,3 +221,50 @@ optional listing → `ep_makeSwapOffer`). Wallet connect button using
 (no signer/relays). Bridge must additionally serve `GET /tx/:txid` (Esplora
 JSON with `vin[].prevout`), `GET /tx/:txid/outspend/:vout`,
 `GET /address/:addr/txs`. The DEX server runs against the same bridge.
+
+## 6. Agent access
+
+Agents (scripts, LLM agents, bots) must be able to use the DEX and a wallet
+without a browser.
+
+### 6.1 DEX server
+
+- `GET /api/openapi.json`: OpenAPI 3.1 document for every endpoint, with
+  examples. `GET /llms.txt`: short plain-text guide (what the DEX is, the
+  trade flow, links to the OpenAPI doc and SPEC offer format).
+- `GET /api/quote?sell=<asset>&buy=<asset>&amount=<atomic>&side=exact_in|exact_out`:
+  returns `{ offers: [Offer], sell_amount, buy_amount, price, price_impact_bps,
+  unfilled }`, using the same whole-offer greedy routing as the web Swap page
+  (the web app should call this instead of routing locally).
+- Machine-friendly errors: `{ error: { code, message } }` with stable
+  snake_case codes (`offer_spent`, `bad_signature`, `unknown_asset`, …).
+- `POST` endpoints accept an `Idempotency-Key` header.
+- Read endpoints support `?limit=&cursor=` pagination.
+
+### 6.2 Headless wallet (`rust/wallet-cli` in the wallet repo, binary `epw`)
+
+Uses `elementsplus-wallet-core` natively; same review model and signing path
+as the extension.
+
+- Keys: `epw init` (new mnemonic) / `epw import` writes an encrypted keystore
+  (`~/.config/epw/`, scrypt or argon2 + XChaCha20-Poly1305); unlock via
+  `EPW_PASSWORD` or prompt. Never prints the mnemonic except on `init`.
+- Config: network (ecx-alpha | regtest with genesis/policy asset), Esplora URL,
+  DEX URL, registry URL.
+- **Policy file** enforced before signing: per-asset max per transaction and
+  per rolling 24 h, allowed recipient addresses (optional), allowed DEX URL,
+  `require_confirmation` (interactive y/N) vs `auto` for agents. Every
+  signature is appended to an audit log (JSONL: time, kind, review, txid).
+- Commands (all support `--json`; default human output):
+  `address`, `balances`, `history`, `send <asset> <amount> <address>`,
+  `issue --name --ticker --precision --amount [--token-amount] [--register]`,
+  `quote <sell> <buy> <amount>`, `swap <sell> <buy> <amount> [--max-slippage-bps]`
+  (quote → take), `offer make <give> <amt> <want> <amt> [--post]`,
+  `offer list`, `offer cancel <txid:vout>`, `review <prepared.json>` and
+  `sign <prepared.json> --approve <review_hash>` for two-step flows.
+- `epw mcp`: MCP server over stdio exposing the same operations as tools
+  (`get_balances`, `get_address`, `get_markets`, `get_order_book`,
+  `get_quote`, `swap`, `make_offer`, `cancel_offer`, `send`, `issue_asset`,
+  `get_history`). Mutating tools return the review and the policy decision;
+  they sign only if the policy allows it.
+- amounts accepted as decimal with asset precision or `atomic:<n>`.
