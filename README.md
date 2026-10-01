@@ -7,10 +7,11 @@ regtest, or another chain.
 Start with [the project handoff](docs/HANDOFF.md) for architecture, upstream
 status, remaining security work, and moving development to another machine.
 
-The merged wallet also contains an opt-in fixed-session
-bonded-preconfirmation integration and operator signer. See
-[`docs/PRECONFIRMATIONS.md`](docs/PRECONFIRMATIONS.md). Without a provisioned
-profile, the existing explorer-broadcast behavior is unchanged.
+Wallet v2 follows [`docs/V2-SPEC.md`](docs/V2-SPEC.md): every transaction
+(transfer, issuance, swap offer/take, cancel) goes through one wallet-computed
+review, a one-time approval bound to its review hash, local signing and explorer
+broadcast. Preconfirmations were removed from the wallet; the parked sources in
+`services/` and `vendor/elementsplus-preconf` are no longer built or tested here.
 
 The extension packages a pinned Rust/LWK-derived WASM core. It generates and
 validates BIP39 mnemonics locally, derives explicit P2WPKH addresses, discovers
@@ -22,13 +23,15 @@ the wallet does not validate the header chain.
 
 ## Scope
 
-- Create/restore onboarding surfaces
-- Locked and unlocked wallet states
-- Dashboard, assets, native-ECX send, and receive flows
-- Explicit/non-confidential transaction policy
-- Issuance, reissuance, burn, confidential transactions, DEX, swaps, and
-  counterparties remain disabled
-- No fabricated demo data
+- Onboarding (create → show phrase → confirm 3 words → password; import/restore)
+- Lock gate with configurable auto-lock
+- Home (balances per asset, verified token metadata, UNVERIFIED tags), Activity
+  (explorer history, display-only), Send → Confirm, Receive with QR, Settings
+- dApp provider `window.elementsplus` (spec §3.3) with per-origin connections
+  and an approval window for transfers, issuance and swaps
+- Explicit/non-confidential transaction policy only
+- `src/ui/preview.html` renders every screen with illustrative sample data
+  (`npm run capture` writes screenshots); the extension itself shows no demo data
 
 ## Development
 

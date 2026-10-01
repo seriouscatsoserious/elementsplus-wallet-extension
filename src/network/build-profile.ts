@@ -17,6 +17,8 @@ export interface WalletBuildProfile {
   readonly aliasBech32Hrp: string;
   readonly aliasBlech32Hrp: string;
   readonly explorerUrl: string;
+  /** DEX web app / server origin. Empty means "not configured" (user sets it in Settings). */
+  readonly dexUrl: string;
   readonly transactionPolicy: "explicit-only";
 }
 
@@ -34,5 +36,6 @@ export const BUILD_NETWORK_PROFILE: WalletBuildProfile = Object.freeze({
   aliasBech32Hrp: "ert",
   aliasBlech32Hrp: "el",
   explorerUrl: "https://explorer.bitnames.info",
+  dexUrl: "",
   transactionPolicy: "explicit-only",
 });

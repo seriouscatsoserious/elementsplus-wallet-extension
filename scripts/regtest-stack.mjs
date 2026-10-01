@@ -1,7 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import {
-  chmodSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -22,12 +20,6 @@ const cliProgram = path.join(nodeBuild, "bin", "elements-functional-test-cli");
 const datadir = path.join(state, "node");
 const rpcPort = "18884";
 const explorerPort = "43199";
-const relayBinary = path.join(root, "vendor", "elementsplus-preconf", "target", "release", "preconf-relay");
-const signerDirectory = path.join(root, "services", "preconfer-signer");
-const signerBinary = path.join(signerDirectory, "target", "release", "elementsplus-preconfer-signer");
-const keyBinary = path.join(signerDirectory, "target", "release", "preconf-key");
-const profileBinary = path.join(signerDirectory, "target", "release", "preconf-profile");
-const bondBinary = path.join(signerDirectory, "target", "release", "preconf-bond");
 const pinnedNodeCommit = "006d2a30b1df340f5d77ca9af21e1c3df18b551b";
 // This directory contains disposable wallet keys and bearer credentials. Keep
 // newly generated state private even when the caller has a permissive umask.
@@ -172,11 +164,6 @@ function bootstrap() {
     if (!/^[1-9][0-9]?$/u.test(jobs)) throw new Error("ELEMENTSPLUS_BUILD_JOBS must be an integer from 1 to 99");
     run("cmake", ["--build", nodeBuild, "--target", "elements-functional-test-node", "elements-functional-test-cli", "--parallel", jobs]);
   }
-  run("cargo", ["build", "--locked", "--release", "--manifest-path", path.join(signerDirectory, "Cargo.toml")]);
-  run("cargo", [
-    "build", "--locked", "--release", "--features", "relay", "--bin", "preconf-relay",
-    "--manifest-path", path.join(root, "vendor", "elementsplus-preconf", "Cargo.toml"),
-  ]);
 }
 
 function start() {
@@ -238,103 +225,14 @@ function mine() {
   process.stdout.write(`Mined block ${hashes[0]} at height ${cli("getblockcount")}\n`);
 }
 
-function findOutput(txid, script) {
-  const transaction = jsonRpc("getrawtransaction", txid, "true");
-  const output = transaction.vout.find((candidate) => candidate.scriptPubKey?.hex === script);
-  if (output === undefined) throw new Error(`transaction ${txid} does not contain expected output ${script}`);
-  return `${txid}:${output.n}`;
-}
-
-function validSecret(pathname) {
-  if (!existsSync(pathname)) writeFileSync(pathname, `${randomBytes(32).toString("hex")}\n`, { mode: 0o600 });
-  chmodSync(pathname, 0o600);
-  const result = tryRun(keyBinary, [pathname]);
-  if (result.ok) return result.output;
-  rmSync(pathname, { force: true });
-  return validSecret(pathname);
-}
-
-function session(address, extensionId) {
-  if (!/^[a-p]{32}$/u.test(extensionId)) {
-    throw new Error("extension ID must be the 32-letter Chromium ID shown on chrome://extensions");
-  }
+function session(address) {
   const validated = jsonRpc("validateaddress", address);
   if (validated.isvalid !== true || typeof validated.scriptPubKey !== "string") {
     throw new Error("wallet address is not valid on this Elements+ regtest node");
   }
   const fundingTxid = walletCli("sendtoaddress", address, "0.01000000");
   mine();
-  const protectedOutput = findOutput(fundingTxid, validated.scriptPubKey);
-  const sessionDirectory = path.join(state, "session");
-  for (const name of ["signer", "relay-one", "relay-two"]) stopPid(name);
-  rmSync(sessionDirectory, { recursive: true, force: true });
-  mkdirSync(sessionDirectory, { recursive: true });
-  const secretPath = path.join(sessionDirectory, "preconfer.secret");
-  const authPath = path.join(sessionDirectory, "wallet.secret");
-  const preconfer = validSecret(secretPath);
-  writeFileSync(authPath, `${randomBytes(32).toString("hex")}\n`, { mode: 0o600 });
-  chmodSync(authPath, 0o600);
-  const currentHeight = Number(cli("getblockcount"));
-  const operatorConfig = {
-    genesis: cli("getblockhash", "0"),
-    fee_asset: jsonRpc("getsidechaininfo").pegged_asset,
-    preconfer,
-    protected_output: protectedOutput,
-    epoch: String(Date.now()),
-    collateral: 100000,
-    active_until: currentHeight + 1000,
-    refund_height: currentHeight + 1010,
-  };
-  const operatorPath = path.join(sessionDirectory, "operator-config.json");
-  writeFileSync(operatorPath, `${JSON.stringify(operatorConfig, null, 2)}\n`, { mode: 0o600 });
-  const template = JSON.parse(run(bondBinary, [operatorPath], { quiet: true }));
-  const decoded = jsonRpc("decodescript", template.script_pubkey);
-  const bondAddress = decoded?.segwit?.address ?? decoded?.address;
-  if (typeof bondAddress !== "string") throw new Error("node could not encode the Simplicity bond address");
-  const bondTxid = walletCli("sendtoaddress", bondAddress, "0.00100000");
-  mine();
-  const bond = findOutput(bondTxid, template.script_pubkey);
-  const profile = { version: 1, sessions: [{ bond, config: operatorConfig }] };
-  const profilePath = path.join(sessionDirectory, "profile.json");
-  writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`, { mode: 0o600 });
-  const profileId = run(profileBinary, [profilePath], { quiet: true });
-  const token = readFileSync(authPath, "utf8").trim();
-  const signerConfig = {
-    listen: "127.0.0.1:8788",
-    allowed_origins: [`chrome-extension://${extensionId}`],
-    profile_path: profilePath,
-    secret_key_path: secretPath,
-    auth_token_path: authPath,
-    decision_journal: path.join(sessionDirectory, "signer.journal"),
-    node_cli: {
-      program: cliProgram,
-      args: ["-chain=elementsregtest", `-datadir=${datadir}`, `-rpcport=${rpcPort}`],
-    },
-    relay_urls: ["ws://127.0.0.1:9430", "ws://127.0.0.1:9431"],
-  };
-  const signerConfigPath = path.join(sessionDirectory, "signer.json");
-  writeFileSync(signerConfigPath, `${JSON.stringify(signerConfig, null, 2)}\n`, { mode: 0o600 });
-  const origin = `chrome-extension://${extensionId}`;
-  startDetached("relay-one", relayBinary, [
-    profilePath, path.join(sessionDirectory, "relay-one.jsonl"), "127.0.0.1:9430", "--origin", origin,
-  ]);
-  startDetached("relay-two", relayBinary, [
-    profilePath, path.join(sessionDirectory, "relay-two.jsonl"), "127.0.0.1:9431", "--origin", origin,
-  ]);
-  startDetached("signer", signerBinary, [signerConfigPath]);
-  const browserConfig = {
-    version: 1,
-    endpoint: "ws://127.0.0.1:8788",
-    relayUrls: ["ws://127.0.0.1:9430", "ws://127.0.0.1:9431"],
-    profile: profileId,
-    bond,
-    authToken: token,
-    operatorConfig,
-  };
-  const command = `await chrome.storage.local.set(${JSON.stringify({ "elementsplus.preconfirmation.v1": browserConfig }, null, 2)});\nlocation.reload();`;
-  const commandPath = path.join(sessionDirectory, "extension-config.js");
-  writeFileSync(commandPath, `${command}\n`, { mode: 0o600 });
-  process.stdout.write(`\nFunded wallet output: ${protectedOutput}\nFunded operator bond: ${bond}\nProfile: ${profileId}\n\nPaste this in the extension service-worker console:\n\n${command}\n\nSaved at ${commandPath}\n`);
+  process.stdout.write(`\nFunded ${address} with 0.01 in ${fundingTxid}\n`);
 }
 
 function status() {
@@ -342,7 +240,7 @@ function status() {
     "-chain=elementsregtest", `-datadir=${datadir}`, `-rpcport=${rpcPort}`, "getblockcount",
   ]);
   process.stdout.write(`node=${nodeStatus.ok ? `height ${nodeStatus.output}` : "down"}\n`);
-  for (const name of ["explorer", "signer", "relay-one", "relay-two"]) {
+  for (const name of ["explorer"]) {
     try {
       process.stdout.write(`${name}=${alive(path.join(state, `${name}.pid`)) ? "up" : "down"}\n`);
     } catch (error) {
@@ -354,7 +252,7 @@ function status() {
 }
 
 function stop() {
-  for (const name of ["signer", "relay-one", "relay-two", "explorer"]) stopPid(name);
+  for (const name of ["explorer"]) stopPid(name);
   const result = tryRun(cliProgram, [
     "-chain=elementsregtest", `-datadir=${datadir}`, `-rpcport=${rpcPort}`, "stop",
   ]);
@@ -372,8 +270,8 @@ switch (action) {
   case "status": status(); break;
   case "mine": mine(); break;
   case "session": {
-    if (args.length !== 2) throw new Error("usage: npm run regtest:session -- WALLET_ADDRESS CHROMIUM_EXTENSION_ID");
-    session(args[0], args[1]);
+    if (args.length !== 1) throw new Error("usage: npm run regtest:session -- WALLET_ADDRESS");
+    session(args[0]);
     break;
   }
   default: throw new Error(`unknown regtest action: ${action}`);

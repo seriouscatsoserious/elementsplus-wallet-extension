@@ -90,31 +90,19 @@ and select `elementsplus-regtest-extension`. Confirm that its name contains
 Create a brand-new disposable wallet in the extension, unlock it, and copy its
 `ert1...` receive address. Never import an existing phrase.
 
-## Fund and provision one fixed session
+## Fund the wallet
 
-In the unprivileged server shell opened above, replacing both values:
+In the unprivileged server shell opened above, replacing the address:
 
 ```sh
 cd /home/codexhost/elementsplus-wallet-test
-npm run regtest:session -- WALLET_ert1_ADDRESS CHROMIUM_EXTENSION_ID
+npm run regtest:session -- WALLET_ert1_ADDRESS
 ```
 
-That command funds and confirms the wallet's protected output, creates and
-confirms the operator's separate 0.001-regtest-ECX Simplicity bond, starts two
-relays plus the signer, and prints one `chrome.storage.local.set(...)` command.
-
-That command contains a disposable signer authentication token. Paste it only
-into your own extension console; do not post it, put it in the repository, or
-give it to a website. Each provisioning run replaces the previous disposable
-session; it is not an automatic multi-payment wallet backend.
-
-At `chrome://extensions`, open the wallet's **service worker** inspector. Paste
-the printed command into its Console. Close and reopen the wallet, unlock it,
-and refresh. It should show 1,000,000 atomic units.
-
-Send a small amount (for example `100000` atomic units) back to the same receive
-address with fee rate `0.1`. The result must first say **Preconfirmed**. Then,
-in the same unprivileged server shell, mine settlement:
+That command sends 0.01 regtest ECX to the address and mines one block. Open the
+wallet, unlock it and it should show 0.01 ECX. Send a small amount back to the
+same receive address from **Send**, review it on the confirm screen and approve.
+The transaction appears under **Activity → Pending**; mine it:
 
 ```sh
 npm run regtest:mine
@@ -122,8 +110,12 @@ npm run regtest:mine
 
 Refresh the wallet; the transaction should now be block-confirmed.
 
+Preconfirmations are no longer part of the wallet (V2 spec §0); the
+`services/` and `vendor/elementsplus-preconf` sources are parked and are not
+built or started by this harness.
+
 If node and browser are on the same Linux machine, omit SSH/SCP, load your local
-`.regtest/dist/chromium`, and run session/mine commands in that same clone.
+`.regtest/dist/chromium`, and run the session/mine commands in that same clone.
 
 ## Scope
 

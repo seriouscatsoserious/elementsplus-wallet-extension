@@ -51,6 +51,7 @@ const profile = Object.freeze({
   aliasBech32Hrp: "elements",
   aliasBlech32Hrp: "elementsl",
   explorerUrl: explorer.origin,
+  dexUrl: typeof network.dexUrl === "string" ? network.dexUrl : "",
   transactionPolicy: "explicit-only",
 });
 

@@ -19,3 +19,4 @@ wallet.mdb
 services/preconfer-signer/target/
 services/preconfer-signer/state/
 services/preconfer-signer/*.secret
+.preview-build/

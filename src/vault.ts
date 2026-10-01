@@ -221,4 +221,8 @@ export class VaultStore {
     if (await this.exists()) throw new ValidationError("wallet vault already exists; refusing to overwrite it");
     await this.storage.set({ [VAULT_STORAGE_KEY]: validateEncryptedVaultRecord(record) });
   }
+  /** Explicit "restore from recovery phrase" path: replaces the existing vault. */
+  async replace(record: EncryptedVaultRecord): Promise<void> {
+    await this.storage.set({ [VAULT_STORAGE_KEY]: validateEncryptedVaultRecord(record) });
+  }
 }
