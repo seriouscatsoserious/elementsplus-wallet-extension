@@ -13,9 +13,37 @@
     "default_popup": "src/ui/wallet.html"
   },
   "options_page": "src/ui/wallet.html",
-  "permissions": ["storage"],
-  "host_permissions": ["https://explorer.bitnames.info/*"],
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://explorer.bitnames.info/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/content/content-script.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/content/inpage.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
+  ],
   "content_security_policy": {
-    "extension_pages": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'self'; img-src 'self' data:; connect-src https://explorer.bitnames.info wss: ws://127.0.0.1:* ws://localhost:*; font-src 'none'; media-src 'none'; form-action 'none'; worker-src 'self'"
+    "extension_pages": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src https://explorer.bitnames.info https: http://127.0.0.1:* http://localhost:*; media-src 'none'; form-action 'none'; worker-src 'self'"
   }
 }

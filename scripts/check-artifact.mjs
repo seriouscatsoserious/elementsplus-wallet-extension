@@ -15,9 +15,24 @@ const required = [
   "src/ui/preview.html",
   "src/ui/preview.js",
   "src/ui/wallet.css",
+  "src/ui/approve.html",
+  "src/ui/approve.js",
+  "src/content/content-script.js",
+  "src/content/inpage.js",
+  "src/ui/fonts/Geist-Variable.woff2",
+  "src/ui/fonts/GeistMono-Variable.woff2",
+  "src/ui/fonts/LICENSE-Geist-OFL.txt",
 ];
+const pageMatches = ["http://*/*", "https://*/*"];
+const expectedContentScripts = [{
+  matches: pageMatches,
+  js: ["src/content/content-script.js"],
+  run_at: "document_start",
+  all_frames: false,
+}];
+const expectedWebAccessible = [{ resources: ["src/content/inpage.js"], matches: pageMatches }];
 const expectedHosts = ["https://explorer.bitnames.info/*"];
-const allowedExtensions = new Set([".css", ".html", ".js", ".json", ".wasm"]);
+const allowedExtensions = new Set([".css", ".html", ".js", ".json", ".wasm", ".woff2", ".txt"]);
 const maximumArtifactBytes = 12 * 1024 * 1024;
 const forbiddenSource = [
   [/(?:^|[^a-z])eval\s*\(/iu, "eval"],
@@ -56,8 +71,22 @@ for (const target of ["chromium", "firefox"]) {
   if (JSON.stringify(manifest.host_permissions) !== JSON.stringify(expectedHosts)) {
     throw new Error(`${target} manifest must grant only the pinned explorer host`);
   }
-  if ("optional_host_permissions" in manifest || "content_scripts" in manifest || "externally_connectable" in manifest) {
+  if ("optional_host_permissions" in manifest || "externally_connectable" in manifest) {
     throw new Error(`${target} manifest exposes an unexpected extension boundary`);
+  }
+  // The dApp provider (spec §3.3) is the only page-facing boundary: one
+  // isolated-world bridge and one web-accessible page script, top frame only.
+  if (JSON.stringify(manifest.content_scripts) !== JSON.stringify(expectedContentScripts)) {
+    throw new Error(`${target} manifest content scripts differ from the reviewed provider bridge`);
+  }
+  if (JSON.stringify(manifest.web_accessible_resources) !== JSON.stringify(expectedWebAccessible)) {
+    throw new Error(`${target} manifest exposes unexpected web-accessible resources`);
+  }
+  for (const name of ["content-script.js", "inpage.js"]) {
+    const source = await readFile(path.join(directory, "src", "content", name), "utf8");
+    if (/^\s*(?:import|export)\b/mu.test(source) || /chrome\.storage|browser\.storage|WasmWalletCore/u.test(source)) {
+      throw new Error(`${target}/src/content/${name} must be a classic script with no wallet or storage access`);
+    }
   }
   const csp = manifest.content_security_policy?.extension_pages;
   if (
@@ -65,12 +94,14 @@ for (const target of ["chromium", "firefox"]) {
     || !csp.includes("default-src 'none'")
     || !csp.includes("script-src 'self' 'wasm-unsafe-eval'")
     || !csp.includes("connect-src https://explorer.bitnames.info")
+    || !csp.includes("font-src 'self'")
+    || /\b(?:ws|wss):/u.test(csp)
     || csp.includes("'unsafe-inline'")
     || csp.includes("'unsafe-eval'")
   ) {
     throw new Error(`${target} manifest CSP is not fail-closed`);
   }
-  for (const name of ["wallet.html", "preview.html"]) {
+  for (const name of ["wallet.html", "approve.html", "preview.html"]) {
     const html = await readFile(path.join(directory, "src", "ui", name), "utf8");
     if (/\sstyle\s*=/iu.test(html) || /<script(?![^>]*\bsrc=)[^>]*>/iu.test(html)) {
       throw new Error(`${target}/${name} contains CSP-blocked inline content`);
@@ -91,6 +122,12 @@ for (const target of ["chromium", "firefox"]) {
     `${pathToFileURL(path.join(directory, "src", "wasm", "elementsplus_wallet_core.js")).href}?${target}`
   );
   bindings.initSync({ module: wasmBytes });
+  for (const name of ["verify_asset_issuance_json", "decode_offer_json"]) {
+    if (typeof bindings[name] !== "function") throw new Error(`${target} wallet core is missing ${name}`);
+  }
+  if ("verify_preconfirmation_receipt" in bindings) {
+    throw new Error(`${target} wallet core still exposes preconfirmation verification`);
+  }
   if (typeof bindings.WasmWalletCore.forRegtest !== "undefined") {
     throw new Error(`${target} production artifact exposes the test-only network constructor`);
   }
@@ -114,21 +151,27 @@ for (const target of ["chromium", "firefox"]) {
       || typeof derived.native_address !== "string"
       || !derived.native_address.startsWith("elements1")
     ) throw new Error(`${target} packaged wallet core derivation smoke test failed`);
-    const prepared = JSON.parse(core.prepare_send_json(JSON.stringify({
+    const prepared = JSON.parse(core.prepare_transfer_json(JSON.stringify({
       recipient: recipient.native_address,
-      amount: 1_000,
-      fee: 400,
+      asset_id: "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4",
+      amount: "1000",
+      fee_rate: 1,
       change_index: 0,
       utxos: [{
         txid: "1".repeat(64),
         vout: 0,
-        value: 10_000,
+        value: "10000",
         asset_id: "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4",
         script_pubkey_hex: derived.script_pubkey_hex,
         branch: "external",
         index: 0,
       }],
     })));
+    if (
+      prepared.review?.kind !== "transfer"
+      || prepared.review.external_outputs?.[0]?.amount !== "1000"
+      || prepared.review.sighash !== "ALL"
+    ) throw new Error(`${target} packaged wallet core review smoke test failed`);
     const signed = JSON.parse(core.sign_prepared_json(
       JSON.stringify(prepared),
       prepared.review_hash,

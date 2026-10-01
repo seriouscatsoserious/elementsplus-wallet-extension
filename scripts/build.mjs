@@ -97,6 +97,32 @@ async function writePreview(targetDirectory) {
   await writeFile(path.join(targetDirectory, "src", "ui", "preview.html"), html, "utf8");
 }
 
+// Geist (SIL Open Font License 1.1) from the pinned `geist` npm package;
+// the extension CSP forbids remote fonts.
+const fontSources = [
+  ["geist-sans/Geist-Variable.woff2", "Geist-Variable.woff2"],
+  ["geist-mono/GeistMono-Variable.woff2", "GeistMono-Variable.woff2"],
+];
+
+async function copyFonts(destination) {
+  const fontRoot = path.join(root, "node_modules", "geist", "dist", "fonts");
+  await mkdir(destination, { recursive: true });
+  for (const [source, name] of fontSources) await copyFile(path.join(fontRoot, source), path.join(destination, name));
+  await copyFile(path.join(root, "node_modules", "geist", "LICENSE.txt"), path.join(destination, "LICENSE-Geist-OFL.txt"));
+}
+
+// Content scripts and the page-world provider are classic scripts. tsc marks
+// every file in this ESM package as a module (`export {};`); remove only that
+// marker and refuse anything that still imports or exports.
+async function finalizeContentScripts(directory) {
+  for (const name of ["content-script.js", "inpage.js"]) {
+    const file = path.join(directory, name);
+    const source = (await readFile(file, "utf8")).replace(/\nexport \{\};\n?$/u, "\n");
+    if (/^\s*(?:import|export)\b/mu.test(source)) throw new Error(`${name} must be a classic script without imports or exports`);
+    await writeFile(file, source, "utf8");
+  }
+}
+
 async function normalizeTimes(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, "en"))) {
@@ -124,10 +150,8 @@ for (const target of targets) {
   await mkdir(targetDirectory, { recursive: true });
   await copyTree(path.join(buildDirectory, "src"), path.join(targetDirectory, "src"));
   await copyTree(wasmDirectory, path.join(targetDirectory, "src", "wasm"));
-  await copyFile(
-    path.join(root, "vendor", "elementsplus-preconf", "client", "monitor.mjs"),
-    path.join(targetDirectory, "src", "preconf", "monitor.js"),
-  );
+  await copyFonts(path.join(targetDirectory, "src", "ui", "fonts"));
+  await finalizeContentScripts(path.join(targetDirectory, "src", "content"));
   await copyStatic(path.join(root, "src"), path.join(targetDirectory, "src"));
   await writePreview(targetDirectory);
   const manifest = JSON.parse(await readFile(path.join(root, "manifest", `${target}.json`), "utf8"));
@@ -138,6 +162,12 @@ for (const target of targets) {
     manifest.host_permissions = [`${explorer.origin}/*`];
     manifest.content_security_policy.extension_pages = manifest.content_security_policy.extension_pages
       .replace("https://explorer.bitnames.info", explorer.origin);
+    if (typeof buildProfile.dexUrl === "string" && buildProfile.dexUrl !== "") {
+      const dex = new URL(buildProfile.dexUrl);
+      if (dex.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(dex.hostname)) {
+        throw new Error("Regtest DEX URL must be a loopback HTTP URL");
+      }
+    }
     if (target === "firefox" && manifest.browser_specific_settings?.gecko !== undefined) {
       manifest.browser_specific_settings.gecko.id = "elementsplus-wallet@local-regtest.invalid";
     }
