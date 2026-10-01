@@ -4,7 +4,10 @@ An experimental browser-extension wallet for the ECX Alpha Elements+ drivechain
 fork. It is **not** a Liquid wallet and never falls back to Liquid, Elements
 regtest, or another chain.
 
-The `feat/preconf-wallet-signer` branch also contains an opt-in fixed-session
+Start with [the project handoff](docs/HANDOFF.md) for architecture, upstream
+status, remaining security work, and moving development to another machine.
+
+The merged wallet also contains an opt-in fixed-session
 bonded-preconfirmation integration and operator signer. See
 [`docs/PRECONFIRMATIONS.md`](docs/PRECONFIRMATIONS.md). Without a provisioned
 profile, the existing explorer-broadcast behavior is unchanged.
@@ -32,7 +35,7 @@ the wallet does not validate the header chain.
 ```sh
 rustup toolchain install 1.89.0 --profile minimal --target wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.108 --locked
-npm ci
+npm ci --ignore-scripts
 npm run check
 ```
 
@@ -44,10 +47,16 @@ from a CDN or at runtime.
 Load `dist/chromium` as an unpacked Chromium extension or
 `dist/firefox` as a temporary Firefox add-on.
 
+For the disposable, funded, full-node preconfirmation harness, see
+[`docs/REGTEST-WALLET.md`](docs/REGTEST-WALLET.md). It builds a separate
+`LOCAL REGTEST` artifact and does not relax this production artifact's chain
+pin.
+
 For the complete copy-pasteable local browser handoff, see
 [docs/LOCAL-TESTING.md](docs/LOCAL-TESTING.md).
 
-The default tests are fully mocked and do not require network access. To opt
+The unit tests do not require a live node; initial dependency installation and
+builds may need network access. To opt
 into a read-only smoke test against the configured ECX Alpha explorer, run:
 
 ```sh

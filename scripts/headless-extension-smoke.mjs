@@ -9,8 +9,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const extensionDirectory = path.resolve(process.env["EXTENSION_DIST"] ?? path.join(root, "dist", "chromium"));
 const chromeBinary = process.env["CHROME_BIN"] ?? "/usr/bin/google-chrome";
 const expectedImplementation = "elementsplus-wallet-core-wasm/0.1.0+esplora";
-const expectedGenesis = "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd";
-const expectedNativeAsset = "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4";
+const expectedGenesis = process.env["EXPECTED_GENESIS"] ?? "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd";
+const expectedNativeAsset = process.env["EXPECTED_NATIVE_ASSET"] ?? "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4";
+const expectedAddressHrp = process.env["EXPECTED_ADDRESS_HRP"] ?? "elements";
 const startupTimeoutMilliseconds = 30_000;
 const operationTimeoutMilliseconds = 90_000;
 
@@ -301,7 +302,7 @@ async function runWalletSmoke(cdp, sessionId) {
     await waitForExpression(cdp, sessionId, `(() => {
       const address = document.querySelector("#receive-address")?.textContent?.trim() ?? "";
       const notice = document.querySelector("#runtime-notice")?.textContent ?? "";
-      return /^elements1[02-9ac-hj-np-z]+$/u.test(address) && /snapshot loaded/i.test(notice);
+      return address.startsWith(${JSON.stringify(`${expectedAddressHrp}1`)}) && /snapshot loaded/i.test(notice);
     })()`, `${label}: wait for live explorer snapshot`);
   };
 
@@ -313,7 +314,7 @@ async function runWalletSmoke(cdp, sessionId) {
     const native = value.assets?.find((asset) => asset.isNative === true);
     return {
       ok: true,
-      canonicalAddress: /^elements1[02-9ac-hj-np-z]+$/u.test(value.receiveAddress),
+      canonicalAddress: typeof value.receiveAddress === "string" && value.receiveAddress.startsWith(${JSON.stringify(`${expectedAddressHrp}1`)}),
       genesisMatches: value.chain?.genesisHash === ${JSON.stringify(expectedGenesis)},
       nativeAssetMatches: value.chain?.nativeAssetId === ${JSON.stringify(expectedNativeAsset)},
       explorerBacked: value.chain?.backend === "explorer",
@@ -375,6 +376,7 @@ async function main() {
     cdp = await CdpConnection.connect(chrome.debuggerUrl);
     await cdp.send("Target.setDiscoverTargets", { discover: true });
     const extensionId = await waitForExtensionId(cdp);
+    if (process.env["PRINT_EXTENSION_ID"] === "1") process.stdout.write(`Extension ID: ${extensionId}\n`);
     const { targetId } = await cdp.send("Target.createTarget", {
       url: `chrome-extension://${extensionId}/src/ui/wallet.html`,
     });

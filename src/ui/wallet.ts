@@ -175,7 +175,7 @@ function configureTransactionStatus(status: WalletStatus): void {
   const message = element<HTMLElement>("send-capability-status");
   if (walletCanTransact(status)) {
     message.className = "subtle-notice";
-    message.textContent = "Native ECX only. Amounts are whole atomic units; outputs are explicit / non-confidential.";
+    message.textContent = "Native ECX only. Amounts are whole szats; outputs are explicit / non-confidential.";
     return;
   }
   message.className = "warning-banner";
@@ -188,7 +188,7 @@ function applySnapshot(snapshot: WalletSnapshot): void {
   latestSnapshot = snapshot;
   renderSnapshot(snapshot);
   const native = snapshot.assets.find((asset) => asset.isNative);
-  setText("send-available", native === undefined ? "Available —" : `Available ${native.amountAtomic} atomic units`);
+  setText("send-available", native === undefined ? "Available —" : `Available ${native.amountAtomic} szats`);
 }
 
 async function synchronizeWalletSnapshot(): Promise<WalletSnapshot> {
@@ -270,11 +270,11 @@ function inputNamed(form: HTMLFormElement, name: string): HTMLInputElement {
 function renderPreparedApproval(approval: PreparedSendApproval): void {
   const summary = approval.summary;
   setText("review-destination", summary.destination);
-  setText("review-amount", `${summary.amountAtomic} atomic units ECX`);
+  setText("review-amount", `${summary.amountAtomic} szats ECX`);
   setText("review-asset", summary.assetId);
-  setText("review-fee", `${summary.networkFeeAtomic} atomic units ECX`);
+  setText("review-fee", `${summary.networkFeeAtomic} szats ECX`);
   setText("review-fee-asset", summary.networkFeeAssetId);
-  setText("review-fee-rate", `${summary.feeRate} atomic units / vbyte`);
+  setText("review-fee-rate", `${summary.feeRate} szats / vbyte`);
   setText("review-policy", summary.transactionPolicy);
   setText("review-expiry", approval.expiresAt);
   setText("review-summary-hash", approval.summaryHash);
@@ -381,11 +381,15 @@ element<HTMLButtonElement>("approve-broadcast").addEventListener("click", () => 
     setText("approval-status", "Signing locally and submitting to the ECX Alpha explorer…");
     try {
       if (!walletCanTransact(statusCache)) throw new Error("Wallet locked before approval");
+      const approvalStartedAt = performance.now();
       const result = parseBroadcastTransactionResult(unwrap(await sendExtensionMessage({
         type: "transaction.approve-and-broadcast",
         approvalToken: approval.approvalToken,
         summaryHash: approval.summaryHash,
       })));
+      setText("preconfirmation-timing", result.settlement === "preconfirmed"
+        ? `Approval to Preconfirmed: ${Math.round(performance.now() - approvalStartedAt)} ms`
+        : "");
       setText("broadcast-txid", result.txid);
       setText("post-broadcast-status", result.settlement === "preconfirmed"
         ? "Preconfirmed by the bonded operator. Waiting for block settlement…"

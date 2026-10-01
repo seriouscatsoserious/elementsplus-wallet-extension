@@ -3,10 +3,18 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { generatedDirectory } from "./build-paths.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = path.join(root, "rust", "wallet-core", "Cargo.toml");
-const output = path.join(root, ".wasm-bindgen");
+const output = await generatedDirectory(root,
+  process.env["ELEMENTSPLUS_WASM_OUTPUT"] ?? path.join(root, ".wasm-bindgen"),
+  [".wasm-bindgen", ".wasm-bindgen-regtest"]);
+const features = process.env["ELEMENTSPLUS_WASM_FEATURES"] ?? "wasm";
+const expectedOutput = features === "wasm" ? ".wasm-bindgen" : ".wasm-bindgen-regtest";
+if (!["wasm", "wasm,regtest"].includes(features) || output !== path.join(root, expectedOutput)) {
+  throw new Error("Production and regtest WASM features must use their separate output directories");
+}
 const targetWasm = path.join(
   root,
   "rust",
@@ -52,7 +60,7 @@ run("cargo", [
   "--locked",
   "--release",
   "--target", "wasm32-unknown-unknown",
-  "--features", "wasm",
+  "--features", features,
 ], {
   CARGO_INCREMENTAL: "0",
   SOURCE_DATE_EPOCH: "946684800",

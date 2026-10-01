@@ -9,9 +9,13 @@ deliberately disabled.
 
 Never import a recovery phrase that controls anything valuable.
 
+For the whole project, upstream changes and remaining work, start with
+[HANDOFF.md](HANDOFF.md). The funded-test handoff is on branch
+`handoff/funded-regtest-20261001`; the separate modern UI PR is not merged here.
+
 ## Requirements
 
-- Git and GitHub CLI (`gh`), authenticated to GitHub
+- Git (the repository is public; GitHub login is optional)
 - Node.js 24 or newer
 - Rust/Cargo with `rustup` (the repository pins Rust 1.89.0)
 - a platform C/C++ build toolchain (`clang` is used on the tested Linux host)
@@ -31,8 +35,7 @@ cargo install wasm-bindgen-cli --version 0.2.108 --locked
 ### macOS, Linux, or Git Bash
 
 ```sh
-gh auth login
-gh repo clone seriouscatsoserious/elementsplus-wallet-extension
+git clone --branch handoff/funded-regtest-20261001 https://github.com/seriouscatsoserious/elementsplus-wallet-extension.git
 cd elementsplus-wallet-extension
 ./scripts/bootstrap-local.sh
 ```
@@ -40,8 +43,7 @@ cd elementsplus-wallet-extension
 ### Windows PowerShell
 
 ```powershell
-gh auth login
-gh repo clone seriouscatsoserious/elementsplus-wallet-extension
+git clone --branch handoff/funded-regtest-20261001 https://github.com/seriouscatsoserious/elementsplus-wallet-extension.git
 Set-Location elementsplus-wallet-extension
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-local.ps1
 ```

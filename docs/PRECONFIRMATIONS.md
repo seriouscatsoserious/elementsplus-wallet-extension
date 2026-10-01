@@ -8,12 +8,12 @@ The visible flow remains `review → approve → preconfirmed → confirmed`. Th
 
 When preconfirmation is configured, the wallet deliberately spends the profile's exact `protected_output`. It sends the already-signed raw transaction over an authenticated WebSocket. The signer checks the live chain, the funded/unspent operator bond, the transaction's protected input, and node mempool acceptance. It then signs and fsyncs one decision for that bond, publishes the receipt to every configured relay, waits for durable acknowledgements, and broadcasts through the trusted node.
 
-The wallet verifies the Schnorr receipt locally with the vendored merged covenant code. It independently replays at least two distinct relay snapshots, requires its receipt to be present in both, and rejects any valid same-bond receipt for another txid before showing `Preconfirmed`.
+The wallet verifies the Schnorr receipt locally with the vendored merged covenant code. It opens persistent WebSocket subscriptions to at least two distinct relays, verifies their initial replay, requires its receipt to be present in all configured relays, and rejects any valid same-bond receipt for another txid before showing `Preconfirmed`. The subscriptions remain open while that client is alive; they are not single HTTP queries. Distinct URLs do not prove independent operators.
 
 ## Hard limits of this milestone
 
 - A deployment profile contains exactly one session. It protects one specific principal output and permits one txid. After that output is spent, a new funded bond/session/profile must be provisioned. Automatic rolling sessions are not implemented.
-- Relay checks are caught-up snapshots at acceptance time. Continuous post-acceptance conflict alerts and persisted cursors are the next milestone.
+- While unlocked, the live monitor also records later conflicts in memory and blocks subsequent preconfirmation attempts. Locking/disconnecting clears this state; browser-worker suspension can interrupt monitoring. Persistent evidence/cursors, visible post-acceptance revocation alerts, and an automatic watchtower/slashing broadcaster are not implemented.
 - The signer is centralized and online. The bond makes equivocation punishable; it does not make the service available and does not identify which victim should receive collateral.
 - Two relays reduce a single-relay omission attack, but operators should deploy them independently. A fully partitioned recipient can still accept stale information.
 - Normal block confirmation remains the final settlement. “Preconfirmed” is explicitly not “confirmed.”

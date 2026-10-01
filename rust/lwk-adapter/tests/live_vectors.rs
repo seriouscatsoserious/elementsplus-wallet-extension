@@ -1,3 +1,5 @@
+// Historical live headers retained after the 2026-10-01 upstream comparison:
+// 4041a8b..006d2a3 changes only contrib preconf tools, not header serialization.
 use std::str::FromStr;
 
 use elements::confidential::{Asset, Nonce, Value};

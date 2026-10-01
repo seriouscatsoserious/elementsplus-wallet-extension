@@ -76,12 +76,12 @@ export interface EcxAlphaAddressSummary {
 
 export const ECX_ALPHA_ADDRESS_HRPS = Object.freeze({
   canonical: Object.freeze({
-    unconfidential: "elements",
-    confidential: "elementsl",
+    unconfidential: ECX_ALPHA_IDENTITY.bech32Hrp,
+    confidential: ECX_ALPHA_IDENTITY.blech32Hrp,
   }),
   lwkAlias: Object.freeze({
-    unconfidential: "ert",
-    confidential: "el",
+    unconfidential: ECX_ALPHA_IDENTITY.aliasBech32Hrp,
+    confidential: ECX_ALPHA_IDENTITY.aliasBlech32Hrp,
   }),
 } as const);
 

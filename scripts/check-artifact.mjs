@@ -91,6 +91,9 @@ for (const target of ["chromium", "firefox"]) {
     `${pathToFileURL(path.join(directory, "src", "wasm", "elementsplus_wallet_core.js")).href}?${target}`
   );
   bindings.initSync({ module: wasmBytes });
+  if (typeof bindings.WasmWalletCore.forRegtest !== "undefined") {
+    throw new Error(`${target} production artifact exposes the test-only network constructor`);
+  }
   const publicTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   if (!bindings.validate_mnemonic(publicTestMnemonic)) {
     throw new Error(`${target} packaged wallet core rejected the public BIP39 test vector`);

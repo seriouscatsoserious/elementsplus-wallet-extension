@@ -55,7 +55,7 @@ class FakeWalletCore implements WasmWalletCoreInstance {
         change_native_address: ADDRESS,
         total_input: 10_000,
         input_count: 1,
-        selected_outpoints: [`${FUNDING_TXID}:0`],
+        selected_outpoints: [`[elements]${FUNDING_TXID}:0`],
       },
       review_hash: REVIEW_HASH,
     });
@@ -249,7 +249,7 @@ describe("Elements+ WASM adapter", () => {
       amountAtomic: "500",
       feeRate: "1",
       explicitOutputsOnly: true,
-    });
+    }, `${FUNDING_TXID}:0`);
     assert.equal(prepared.pset, "cHNldP8=");
     assert.equal(prepared.coreReviewHash, REVIEW_HASH);
     assert.equal(prepared.summary.networkFeeAtomic, "344");

@@ -1,5 +1,20 @@
 # Compatibility audit — 2026-09-19
 
+## Source recheck — 2026-10-01
+
+Published `master` is now `006d2a30b1df340f5d77ca9af21e1c3df18b551b`.
+[The comparison from the previously observed revision](https://github.com/ekulkisnek/liquid-drivechain-signet-adaptation/compare/4041a8ba5d9c0870dbe22c188bce28410c10348a...006d2a30b1df340f5d77ca9af21e1c3df18b551b)
+contains seven commits and changes only `contrib/devtools/preconf-user-bond`.
+There are no node header, identity, asset, consensus or transaction-format
+changes in that range. The historical header fixtures are retained unchanged
+and their tests rerun; the full 29-file vendored preconf crate matches the new
+revision exactly. Source-observation metadata is updated, not the frozen live
+network pins or published binary pin.
+
+The live explorer smoke test returned HTTP 502 on this recheck, so the current
+validator revision and live chain state remain unconfirmed. The observations
+below are historical September 19 evidence, not a fresh network claim.
+
 ## Published binary and current source
 
 The last published binary is the **explicit-only desktop-r2** release:
@@ -10,7 +25,7 @@ The last published binary is the **explicit-only desktop-r2** release:
 - LWK witness aliases added by the release: `ert` and `el`;
 - native witness HRPs: `elements` and `elementsl`.
 
-Current repository `master`, commit
+Repository `master` as observed on September 19, commit
 `4041a8ba5d9c0870dbe22c188bce28410c10348a`, re-enabled confidential payments.
 Because it kept the same genesis and network identity, genesis and policy-asset
 checks cannot reveal which validator revision a peer runs. Mixing those

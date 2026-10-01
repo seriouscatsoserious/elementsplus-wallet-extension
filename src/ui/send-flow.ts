@@ -36,7 +36,7 @@ function fail(message: string): never {
 }
 
 function positiveAtomicAmount(value: string): string {
-  if (!/^(?:0|[1-9][0-9]*)$/u.test(value)) fail("Amount must be a canonical whole number of atomic units");
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(value)) fail("Amount must be a canonical whole number of szats");
   const amount = BigInt(value);
   if (amount === 0n) fail("Amount must be greater than zero");
   if (amount > MAX_U64) fail("Amount is too large");

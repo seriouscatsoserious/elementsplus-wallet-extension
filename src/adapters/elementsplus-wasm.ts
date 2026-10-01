@@ -51,6 +51,12 @@ export interface WasmWalletCoreInstance {
 
 export interface WasmWalletCoreConstructor {
   new (mnemonic: string): WasmWalletCoreInstance;
+  readonly forRegtest?: (
+    mnemonic: string,
+    genesisHash: string,
+    policyAsset: string,
+    displayName: string,
+  ) => WasmWalletCoreInstance;
 }
 
 export interface ElementsPlusWalletCoreBindings {
@@ -275,9 +281,14 @@ function parseCoreReview(value: unknown): CoreReview {
     fail("core review outpoint list is malformed");
   }
   const selectedOutpoints = review["selected_outpoints"].map((value, index) => {
-    const outpoint = exactString(value, `selected outpoint ${index}`, 80);
-    if (!/^[0-9a-f]{64}:[0-9]{1,10}$/u.test(outpoint)) fail(`selected outpoint ${index} is malformed`);
-    return outpoint;
+    const outpoint = exactString(value, `selected outpoint ${index}`, 85);
+    // elements::OutPoint displays with an "[elements]" prefix. Normalize it
+    // for comparison with the wallet scanner's canonical txid:vout format.
+    const canonical = outpoint.startsWith("[elements]") ? outpoint.slice(10) : outpoint;
+    if (!/^[0-9a-f]{64}:(?:0|[1-9][0-9]{0,9})$/u.test(canonical)) {
+      fail(`selected outpoint ${index} is malformed`);
+    }
+    return canonical;
   });
   if (new Set(selectedOutpoints).size !== selectedOutpoints.length) {
     fail("core review contains duplicate outpoints");
@@ -633,7 +644,7 @@ class ElementsPlusWasmSession implements LwkWalletSession {
     const assets: WalletAsset[] = [...totals.entries()].map(([assetId, amount]) => Object.freeze({
       assetId,
       ticker: assetId === ECX_ALPHA_IDENTITY.nativeAssetId ? "ECX" : null,
-      name: assetId === ECX_ALPHA_IDENTITY.nativeAssetId ? "ECX Alpha" : null,
+      name: assetId === ECX_ALPHA_IDENTITY.nativeAssetId ? ECX_ALPHA_IDENTITY.displayName : null,
       amountAtomic: amount.total.toString(),
       confirmedAtomic: amount.confirmed.toString(),
       isNative: assetId === ECX_ALPHA_IDENTITY.nativeAssetId,
@@ -748,7 +759,18 @@ export class ElementsPlusWasmAdapter implements LwkWalletAdapter {
     if (!bindings.validate_mnemonic(normalized)) fail("invalid recovery phrase");
     let core: WasmWalletCoreInstance | undefined;
     try {
-      core = new bindings.WasmWalletCore(normalized);
+      if (ECX_ALPHA_IDENTITY.mode === "elementsplus-regtest") {
+        const factory = bindings.WasmWalletCore.forRegtest;
+        if (typeof factory !== "function") fail("regtest artifact is missing its test-only wallet constructor");
+        core = factory(
+          normalized,
+          ECX_ALPHA_IDENTITY.genesisHash,
+          ECX_ALPHA_IDENTITY.nativeAssetId,
+          ECX_ALPHA_IDENTITY.displayName,
+        );
+      } else {
+        core = new bindings.WasmWalletCore(normalized);
+      }
       return new ElementsPlusWasmSession(
         core,
         this.#scannerFactory,

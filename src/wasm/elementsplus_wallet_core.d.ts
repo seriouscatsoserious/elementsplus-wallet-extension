@@ -14,6 +14,12 @@ export function verify_preconfirmation_receipt(configJson: string, receiptJson: 
 
 export class WasmWalletCore {
   constructor(mnemonic: string);
+  static forRegtest?(
+    mnemonic: string,
+    genesisHash: string,
+    policyAsset: string,
+    displayName: string,
+  ): WasmWalletCore;
   derive_address_json(branch: string, index: number): string;
   prepare_send_json(requestJson: string): string;
   sign_prepared_json(preparedJson: string, approvedReviewHash: string): string;

@@ -12,7 +12,8 @@ repository = "https://github.com/ekulkisnek/liquid-drivechain-signet-adaptation"
 release_tag = "elements-alpha-cad1fc1fb-desktop-r2"
 revision = "b2b928fd65e02901d8a98ee38adfe35dfb0f379f"
 explicit_only_height = 84
-current_master_observed = "4041a8ba5d9c0870dbe22c188bce28410c10348a"
+current_master_observed = "006d2a30b1df340f5d77ca9af21e1c3df18b551b"
+current_master_observed_date = "2026-10-01"
 current_master_confidential_payments = true
 live_validator_revision = "unconfirmed"
 

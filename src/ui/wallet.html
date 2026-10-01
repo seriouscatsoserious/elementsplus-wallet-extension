@@ -102,8 +102,8 @@
             <fieldset disabled data-chain-fieldset>
               <label>Recipient<input name="destination" required maxlength="1000" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste explicit ECX Alpha address"></label>
               <label>Asset<select name="asset" disabled><option value="native">ECX — native asset only</option></select></label>
-              <section class="amount-entry"><div><label for="send-amount">Amount (atomic units)</label></div><div><input id="send-amount" name="amount" required maxlength="20" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="0"><strong>atomic</strong></div><small id="send-available">Available —</small></section>
-              <label>Fee rate <small>Positive atomic units per vbyte</small><input name="fee-rate" required maxlength="32" inputmode="decimal" value="1" pattern="(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{0,7}[1-9])?"></label>
+              <section class="amount-entry"><div><label for="send-amount">Amount (szats)</label></div><div><input id="send-amount" name="amount" required maxlength="20" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="0"><strong>szats</strong></div><small id="send-available">Available —</small></section>
+              <label>Fee rate <small>Positive szats per vbyte</small><input name="fee-rate" required maxlength="32" inputmode="decimal" value="1" pattern="(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{0,7}[1-9])?"></label>
               <label>Output policy<select name="privacy" disabled><option value="explicit">Explicit / non-confidential only</option></select></label>
               <button id="review-transaction" class="primary-button sticky-action" type="submit">Review exact transaction</button>
             </fieldset>
@@ -139,6 +139,7 @@
             <div><span>Transaction ID</span><output id="broadcast-txid" class="mono-value">—</output></div>
           </section>
           <p id="post-broadcast-status" class="inline-status review-status" role="status" aria-live="polite"></p>
+          <p id="preconfirmation-timing" class="inline-status review-status" role="status" aria-live="polite"></p>
           <button class="primary-button sticky-action" type="button" data-view-link="dashboard">Return to wallet</button>
         </section>
 

@@ -1,16 +1,6 @@
-export const ECX_ALPHA_IDENTITY = Object.freeze({
-  key: "ecx-alpha-elements-v11",
-  displayName: "ECX Alpha",
-  implementation: "Elements+",
-  sidechainSlot: 24,
-  genesisHash: "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd",
-  nativeAssetId: "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4",
-  parentGenesisHash: "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
-  bech32Hrp: "elements",
-  blech32Hrp: "elementsl",
-  explorerUrl: "https://explorer.bitnames.info",
-  transactionPolicy: "explicit-only",
-} as const);
+import { BUILD_NETWORK_PROFILE } from "./build-profile.js";
+
+export const ECX_ALPHA_IDENTITY = Object.freeze({ ...BUILD_NETWORK_PROFILE });
 
 export type EcxAlphaIdentity = typeof ECX_ALPHA_IDENTITY;
 

@@ -33,8 +33,8 @@ pub const LWK_REVISION: &str = "55671e82c0cc713ece341f74704ff39255c633ec";
 /// about every validator on the live network.
 pub const ELEMENTS_PLUS_REVISION: &str = "b2b928fd65e02901d8a98ee38adfe35dfb0f379f";
 pub const ELEMENTS_PLUS_RELEASE_TAG: &str = "elements-alpha-cad1fc1fb-desktop-r2";
-pub const ELEMENTS_PLUS_CURRENT_MASTER_REVISION: &str =
-    "4041a8ba5d9c0870dbe22c188bce28410c10348a";
+/// Published source observed 2026-10-01; not an assertion about live validators.
+pub const ELEMENTS_PLUS_CURRENT_MASTER_REVISION: &str = "006d2a30b1df340f5d77ca9af21e1c3df18b551b";
 
 pub const NETWORK_NAME: &str = "ECX Alpha";
 pub const SIDECHAIN_SLOT: u8 = 24;

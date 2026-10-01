@@ -9,13 +9,21 @@
     "build": "npm run build:wasm && node scripts/build.mjs && node scripts/check-artifact.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "node scripts/test.mjs",
+    "test:build": "node --test test/build-paths.test.mjs",
     "test:preconf": "cargo test --manifest-path services/preconfer-signer/Cargo.toml",
     "test:monitor": "node --test vendor/elementsplus-preconf/client/monitor.test.mjs",
     "test:monitor:integration": "node --test vendor/elementsplus-preconf/client/integration.test.mjs",
     "test:extension": "node scripts/headless-extension-smoke.mjs",
     "test:live": "node scripts/live-network-smoke.mjs",
+    "build:regtest": "node scripts/build-regtest.mjs",
+    "regtest:bootstrap": "node scripts/regtest-stack.mjs bootstrap",
+    "regtest:start": "node scripts/regtest-stack.mjs start",
+    "regtest:status": "node scripts/regtest-stack.mjs status",
+    "regtest:session": "node scripts/regtest-stack.mjs session",
+    "regtest:mine": "node scripts/regtest-stack.mjs mine",
+    "regtest:stop": "node scripts/regtest-stack.mjs stop",
     "preview": "node scripts/serve-preview.mjs",
-    "check": "npm run typecheck && npm test && npm run test:preconf && npm run test:monitor && npm run build"
+    "check": "npm run typecheck && npm test && npm run test:build && npm run test:preconf && npm run test:monitor && npm run build"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

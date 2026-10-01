@@ -28,6 +28,8 @@ use elementsplus_lwk_adapter::{
     lwk_network, preview_explicit_pset, validate_explicit_transaction, NATIVE_ADDRESS_PARAMS,
 };
 pub use elementsplus_lwk_adapter::{GENESIS_HASH, NETWORK_NAME, POLICY_ASSET};
+#[cfg(feature = "regtest")]
+use lwk_common::ElementsParamsBuilder;
 use lwk_common::{get_genesis_hash, set_genesis_hash, Network, Signer};
 use lwk_signer::bip39::{Language, Mnemonic};
 use lwk_signer::SwSigner;
@@ -987,6 +989,40 @@ mod wasm {
             WalletCore::new(mnemonic)
                 .map(|inner| Self { inner })
                 .map_err(js_error)
+        }
+
+        /// Test-only constructor for the isolated Elements+ functional chain.
+        /// It is absent from the reviewed production WASM artifact.
+        #[cfg(feature = "regtest")]
+        #[wasm_bindgen(js_name = forRegtest)]
+        pub fn for_regtest(
+            mnemonic: &str,
+            genesis_hash: &str,
+            policy_asset: &str,
+            display_name: &str,
+        ) -> Result<WasmWalletCore, JsValue> {
+            let genesis_hash = BlockHash::from_str(genesis_hash)
+                .map_err(|_| JsValue::from_str("invalid regtest genesis hash"))?;
+            let policy_asset = AssetId::from_str(policy_asset)
+                .map_err(|_| JsValue::from_str("invalid regtest policy asset"))?;
+            let parent_genesis = Network::default_regtest().parent_genesis_hash();
+            let network = Network::CustomElements(
+                ElementsParamsBuilder::new()
+                    .with_genesis_hash(genesis_hash)
+                    .with_policy_asset(policy_asset)
+                    .with_parent_genesis_hash(parent_genesis)
+                    .build()
+                    .map_err(|_| JsValue::from_str("invalid regtest network parameters"))?,
+            );
+            WalletCore::new_for_network(
+                mnemonic,
+                network,
+                display_name,
+                &AddressParams::ELEMENTS,
+                &AddressParams::ELEMENTS,
+            )
+            .map(|inner| Self { inner })
+            .map_err(js_error)
         }
 
         pub fn derive_address_json(&self, branch: &str, index: u32) -> Result<String, JsValue> {
