@@ -83,7 +83,7 @@ export function homeScreen(app: App): HTMLElement {
   return h("div", { class: "screen" },
     header(app),
     h("section", { class: "bal" },
-      h("div", { class: `big${wallet === undefined ? " dim" : ""}` }, amount(nativeBalance, nativeToken), " ", h("span", null, "ECX")),
+      h("div", { class: `big${wallet === undefined ? " dim" : ""}` }, wallet === undefined ? "–" : amount(nativeBalance, nativeToken), " ", h("span", null, "ECX")),
       address === null ? null : h("button", { class: "addr mono", type: "button", title: "Copy address", onclick: () => void app.copy(address, "Address copied") },
         shortAddress(address), icon("copy", "sm")),
     ),

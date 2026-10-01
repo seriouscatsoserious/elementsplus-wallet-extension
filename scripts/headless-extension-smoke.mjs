@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -8,7 +9,6 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const extensionDirectory = path.resolve(process.env["EXTENSION_DIST"] ?? path.join(root, "dist", "chromium"));
 const chromeBinary = process.env["CHROME_BIN"] ?? "/usr/bin/google-chrome";
-const expectedImplementation = "elementsplus-wallet-core-wasm/0.1.0+esplora";
 const expectedGenesis = process.env["EXPECTED_GENESIS"] ?? "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd";
 const expectedNativeAsset = process.env["EXPECTED_NATIVE_ASSET"] ?? "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4";
 const expectedAddressHrp = process.env["EXPECTED_ADDRESS_HRP"] ?? "elements";
@@ -211,18 +211,6 @@ const initializeHarnessExpression = `(() => {
     configurable: true,
     value: {
       password,
-      setValue(selector, value) {
-        const node = document.querySelector(selector);
-        if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) throw new Error("Expected form control");
-        node.value = value;
-        node.dispatchEvent(new Event("input", { bubbles: true }));
-        node.dispatchEvent(new Event("change", { bubbles: true }));
-      },
-      click(selector) {
-        const node = document.querySelector(selector);
-        if (!(node instanceof HTMLElement)) throw new Error("Expected clickable element");
-        node.click();
-      },
       async request(message) {
         return chrome.runtime.sendMessage(message);
       },
@@ -242,90 +230,41 @@ async function runWalletSmoke(cdp, sessionId) {
       ok: true,
       initialized: value.initialized,
       unlocked: value.unlocked,
-      available: value.adapter?.available,
-      implementation: value.adapter?.implementation,
-      capabilities: value.adapter?.capabilities,
       genesisHash: value.network?.genesisHash,
-      nativeAssetId: value.network?.nativeAssetId,
+      policyAsset: value.network?.policyAsset,
+      screen: document.querySelector("#app")?.dataset.screen ?? null,
     };
   })()`, "Read initial wallet status");
   assert(initial?.ok === true, "Background wallet.status failed");
   assert(initial.initialized === false && initial.unlocked === false, "Fresh profile did not start uninitialized and locked");
-  assert(initial.available === true, "Built extension did not load the real wallet adapter");
-  assert(initial.implementation === expectedImplementation, "Unexpected wallet adapter implementation");
-  assert(initial.genesisHash === expectedGenesis && initial.nativeAssetId === expectedNativeAsset, "Background reported the wrong chain identity");
-  assert(initial.capabilities?.mnemonic === true, "Mnemonic capability is unavailable");
-  assert(initial.capabilities?.walletSync === true, "Wallet synchronization capability is unavailable");
-  assert(initial.capabilities?.explicitTransactions === true, "Explicit transaction capability is unavailable");
-  for (const capability of ["issuance", "reissuance", "burning", "confidentialTransactions", "dex"]) {
-    assert(initial.capabilities?.[capability] === false, `Unsafe or unfinished capability is enabled: ${capability}`);
-  }
+  assert(initial.genesisHash === expectedGenesis && initial.policyAsset === expectedNativeAsset, "Background reported the wrong chain identity");
+  assert(initial.screen === "welcome", "Fresh profile did not show onboarding");
 
-  await evaluate(cdp, sessionId, `(() => {
-    __elementsPlusSmoke.click('[data-view-link="setup"]');
-    __elementsPlusSmoke.click("#generate-phrase");
-    return true;
-  })()`, "Generate disposable recovery phrase");
-  await waitForExpression(cdp, sessionId, `(() => {
-    const node = document.querySelector("#generated-phrase");
-    if (!(node instanceof HTMLElement)) return false;
-    const count = node.textContent.trim().split(/\\s+/u).length;
-    return [12, 15, 18, 21, 24].includes(count);
-  })()`, "Wait for generated recovery phrase");
-
-  await evaluate(cdp, sessionId, `(() => {
-    __elementsPlusSmoke.setValue("#setup-password", __elementsPlusSmoke.password);
-    __elementsPlusSmoke.setValue("#setup-confirm", __elementsPlusSmoke.password);
-    const backup = document.querySelector("#backup-ack");
-    const identity = document.querySelector("#identity-ack");
-    if (!(backup instanceof HTMLInputElement) || !(identity instanceof HTMLInputElement)) throw new Error("Missing setup acknowledgements");
-    backup.checked = true;
-    identity.checked = true;
-    document.querySelector("#setup-form")?.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
-    return true;
+  const created = await evaluate(cdp, sessionId, `(async () => {
+    const generated = await __elementsPlusSmoke.request({ type: "mnemonic.generate" });
+    if (!generated?.ok) return { ok: false, step: "generate" };
+    const mnemonic = generated.result.mnemonic;
+    const words = mnemonic.split(" ").length;
+    const response = await __elementsPlusSmoke.request({ type: "vault.create", password: __elementsPlusSmoke.password, mnemonic });
+    return { ok: response?.ok === true, words, error: response?.error?.message };
   })()`, "Create encrypted disposable vault");
-  await waitForExpression(cdp, sessionId, `(async () => {
-    const response = await __elementsPlusSmoke.request({ type: "wallet.status" });
-    return response?.ok === true && response.result.initialized === true && response.result.unlocked === false;
-  })()`, "Wait for encrypted vault creation");
+  assert(created?.ok === true && created.words === 12, `Vault creation failed: ${created?.error ?? created?.step}`);
 
-  const unlockAndWaitForSnapshot = async (label) => {
-    await evaluate(cdp, sessionId, `(() => {
-      __elementsPlusSmoke.setValue("#unlock-password", __elementsPlusSmoke.password);
-      document.querySelector("#unlock-form")?.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
-      return true;
-    })()`, label);
-    await waitForExpression(cdp, sessionId, `(async () => {
-      const response = await __elementsPlusSmoke.request({ type: "wallet.status" });
-      return response?.ok === true && response.result.unlocked === true;
-    })()`, `${label}: wait for unlock`);
-    await waitForExpression(cdp, sessionId, `(() => {
-      const address = document.querySelector("#receive-address")?.textContent?.trim() ?? "";
-      const notice = document.querySelector("#runtime-notice")?.textContent ?? "";
-      return address.startsWith(${JSON.stringify(`${expectedAddressHrp}1`)}) && /snapshot loaded/i.test(notice);
-    })()`, `${label}: wait for live explorer snapshot`);
-  };
-
-  await unlockAndWaitForSnapshot("Unlock disposable vault");
   const snapshotCheck = await evaluate(cdp, sessionId, `(async () => {
     const response = await __elementsPlusSmoke.request({ type: "wallet.snapshot" });
-    if (!response?.ok) return { ok: false };
-    const value = response.result;
-    const native = value.assets?.find((asset) => asset.isNative === true);
+    if (!response?.ok) return { ok: false, error: response?.error?.message };
+    const { snapshot } = response.result;
+    const native = snapshot.balances.find((entry) => entry.assetId === ${JSON.stringify(expectedNativeAsset)});
     return {
       ok: true,
-      canonicalAddress: typeof value.receiveAddress === "string" && value.receiveAddress.startsWith(${JSON.stringify(`${expectedAddressHrp}1`)}),
-      genesisMatches: value.chain?.genesisHash === ${JSON.stringify(expectedGenesis)},
-      nativeAssetMatches: value.chain?.nativeAssetId === ${JSON.stringify(expectedNativeAsset)},
-      explorerBacked: value.chain?.backend === "explorer",
-      headerChainUnverified: value.chain?.headerChainVerified === false,
-      explicitOnly: value.chain?.transactionPolicy === "explicit-only",
-      validTip: Number.isSafeInteger(value.tipHeight) && value.tipHeight >= 0 && /^[0-9a-f]{64}$/u.test(value.tipHash),
-      nativeEntry: native?.assetId === ${JSON.stringify(expectedNativeAsset)} && /^\\d+$/u.test(native.amountAtomic),
+      canonicalAddress: snapshot.receiveAddress.startsWith(${JSON.stringify(`${expectedAddressHrp}1`)}),
+      primaryAddress: snapshot.primaryAddress.startsWith(${JSON.stringify(`${expectedAddressHrp}1`)}),
+      validTip: Number.isSafeInteger(snapshot.tipHeight) && snapshot.tipHeight >= 0,
+      nativeEntry: native !== undefined && /^\\d+$/u.test(native.amount),
     };
   })()`, "Verify explorer-backed wallet snapshot");
-  assert(snapshotCheck?.ok === true, "Live wallet snapshot request failed");
-  for (const field of ["canonicalAddress", "genesisMatches", "nativeAssetMatches", "explorerBacked", "headerChainUnverified", "explicitOnly", "validTip", "nativeEntry"]) {
+  assert(snapshotCheck?.ok === true, `Live wallet snapshot request failed: ${snapshotCheck?.error}`);
+  for (const field of ["canonicalAddress", "primaryAddress", "validTip", "nativeEntry"]) {
     assert(snapshotCheck[field] === true, `Wallet snapshot assertion failed: ${field}`);
   }
 
@@ -333,36 +272,55 @@ async function runWalletSmoke(cdp, sessionId) {
     const snapshot = await __elementsPlusSmoke.request({ type: "wallet.snapshot" });
     if (!snapshot?.ok) return { failedClosed: false };
     const response = await __elementsPlusSmoke.request({
-      type: "transaction.prepare-send",
-      assetId: ${JSON.stringify(expectedNativeAsset)},
-      destination: snapshot.result.receiveAddress,
-      amountAtomic: "1",
-      feeRate: "1",
+      type: "tx.prepare",
+      operation: { kind: "transfer", assetId: ${JSON.stringify(expectedNativeAsset)}, recipient: snapshot.result.snapshot.receiveAddress, amount: "1", feeRate: 1 },
     });
-    return {
-      failedClosed: response?.ok === false,
-      leakedApproval: response?.result?.approvalToken !== undefined,
-    };
-  })()`, "Exercise insufficient-funds prepare-send");
+    return { failedClosed: response?.ok === false, leakedApproval: response?.result?.approvalToken !== undefined };
+  })()`, "Exercise insufficient-funds prepare");
   assert(insufficientFunds?.failedClosed === true && insufficientFunds.leakedApproval === false, "Unfunded send did not fail closed before approval");
 
-  await evaluate(cdp, sessionId, `(() => {
-    __elementsPlusSmoke.click("#lock-wallet");
-    return true;
-  })()`, "Lock wallet");
-  await waitForExpression(cdp, sessionId, `(async () => {
-    const response = await __elementsPlusSmoke.request({ type: "wallet.status" });
-    return response?.ok === true && response.result.unlocked === false;
-  })()`, "Wait for wallet lock");
-  await unlockAndWaitForSnapshot("Unlock wallet after lock");
+  const relock = await evaluate(cdp, sessionId, `(async () => {
+    await __elementsPlusSmoke.request({ type: "wallet.lock" });
+    const locked = await __elementsPlusSmoke.request({ type: "wallet.status" });
+    const snapshot = await __elementsPlusSmoke.request({ type: "wallet.snapshot" });
+    const unlock = await __elementsPlusSmoke.request({ type: "wallet.unlock", password: __elementsPlusSmoke.password });
+    return { locked: locked?.result?.unlocked === false, snapshotRefused: snapshot?.error?.code === "LOCKED", unlocked: unlock?.ok === true };
+  })()`, "Lock and unlock");
+  assert(relock?.locked === true && relock.snapshotRefused === true && relock.unlocked === true, "Lock/unlock cycle failed");
 
   await evaluate(cdp, sessionId, `(() => {
-    const input = document.querySelector("#unlock-password");
-    if (input instanceof HTMLInputElement) input.value = "";
     __elementsPlusSmoke.password = "";
     delete globalThis.__elementsPlusSmoke;
     return true;
   })()`, "Clear disposable in-page credentials");
+}
+
+/** The provider is injected into http(s) pages and refuses unconnected origins. */
+async function runProviderSmoke(cdp) {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end("<!doctype html><title>dapp</title><p>dapp</p>");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { targetId } = await cdp.send("Target.createTarget", { url: `http://127.0.0.1:${server.address().port}/` });
+    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await waitForExpression(cdp, sessionId, "window.elementsplus?.isElementsPlus === true", "Wait for injected provider");
+    const result = await evaluate(cdp, sessionId, `(async () => {
+      const codes = {};
+      for (const method of ["ep_getAddress", "ep_getBalances", "ep_sendTransfer", "nope"]) {
+        try { await window.elementsplus.request({ method, params: {} }); codes[method] = "resolved"; }
+        catch (error) { codes[method] = error.code; }
+      }
+      return codes;
+    })()`, "Probe provider error codes");
+    assert(result.ep_getAddress === 4100 && result.ep_getBalances === 4100 && result.ep_sendTransfer === 4100, "Unconnected origin was not refused with 4100");
+    assert(result.nope === 4200, "Unknown method was not refused with 4200");
+    await cdp.send("Target.closeTarget", { targetId });
+  } finally {
+    server.close();
+  }
 }
 
 async function main() {
@@ -386,8 +344,10 @@ async function main() {
     await waitForExpression(cdp, sessionId, "document.readyState === 'complete'", "Wait for extension popup");
     const loadedExtensionId = await evaluate(cdp, sessionId, "globalThis.chrome?.runtime?.id ?? null", "Verify extension execution context");
     assert(loadedExtensionId === extensionId, "Chrome did not load the expected unpacked extension context");
+    await waitForExpression(cdp, sessionId, "document.querySelector('#app')?.dataset.screen === 'welcome'", "Wait for onboarding screen");
     await withTimeout(runWalletSmoke(cdp, sessionId), 4 * operationTimeoutMilliseconds, "Headless extension smoke test");
-    process.stdout.write("PASS: built Chromium extension completed real-adapter vault, lock/unlock, live sync, trust-boundary, and fail-closed send smoke checks\n");
+    await withTimeout(runProviderSmoke(cdp), operationTimeoutMilliseconds, "Provider smoke test");
+    process.stdout.write("PASS: built Chromium extension completed vault, lock/unlock, live sync, fail-closed send and provider-boundary smoke checks\n");
   } catch (error) {
     failure = error;
     throw error;

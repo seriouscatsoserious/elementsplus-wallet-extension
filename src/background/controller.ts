@@ -462,6 +462,20 @@ export class WalletController {
       ...review.externalOutputs.map((output) => output.assetId),
     ]);
     if (operation.kind === "swap_offer") assets.add(operation.giveAsset).add(operation.wantAsset);
+    const tokens = { ...await this.#tokens([...assets], true) };
+    if (operation.kind === "issuance" && review.issuance !== null) {
+      // The core derived these ids from exactly this contract: label the new asset with it.
+      tokens[review.issuance.assetId] = Object.freeze({
+        assetId: review.issuance.assetId, name: operation.name, ticker: operation.ticker, precision: operation.precision,
+        verified: true, native: false, tokenFor: null,
+      });
+      if (review.issuance.tokenId !== null) {
+        tokens[review.issuance.tokenId] = Object.freeze({
+          assetId: review.issuance.tokenId, name: `${operation.name} reissuance token`, ticker: `${operation.ticker}-RT`, precision: 0,
+          verified: true, native: false, tokenFor: review.issuance.assetId,
+        });
+      }
+    }
     return Object.freeze({
       approvalId: id,
       approvalToken,
@@ -470,7 +484,7 @@ export class WalletController {
       origin,
       operation: summarize(operation, plan),
       review,
-      tokens: await this.#tokens([...assets], true),
+      tokens,
     });
   }
 

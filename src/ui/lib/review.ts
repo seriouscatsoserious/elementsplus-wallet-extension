@@ -55,8 +55,9 @@ export function legsCard(review: TxReview, operation: OperationSummary, tokens: 
     const token = tokenFor(tokens, leg.assetId);
     return h("div", { class: `leg${index > 0 ? " sep" : ""}` },
       avatar(token),
-      h("span", { class: "grow" }, h("span", { class: "muted" }, leg.label), token.verified ? null : h("small", { class: "mono muted block" }, shortId(leg.assetId, 8, 6))),
-      h("strong", { class: `big-amt ${leg.amount < 0n ? "neg" : "pos"}` }, amountWithSymbol(leg.amount, token, { signed: true })),
+      h("span", { class: "grow" }, h("span", { class: "muted" }, leg.label), token.verified ? null : h("span", { class: "block" }, h("span", { class: "tag flush" }, "UNVERIFIED"))),
+      h("strong", { class: `big-amt ${leg.amount < 0n ? "neg" : "pos"}` },
+        token.verified ? amountWithSymbol(leg.amount, token, { signed: true }) : `${formatAtomic(leg.amount, 0, { signed: true })} units`),
     );
   }));
 }
@@ -102,6 +103,9 @@ export function factsCard(view: Pick<ApprovalView, "review" | "operation" | "tok
     rows.push(kv("Decimals", String(operation.precision)));
     if (review.issuance.tokenId !== null) rows.push(kv("Reissuance tokens", review.issuance.tokenAmount));
   }
+  const unknown = new Set([...legs(review, operation).map((leg) => leg.assetId), ...review.externalOutputs.map((output) => output.assetId)]
+    .filter((assetId) => !tokenFor(tokens, assetId).verified));
+  for (const assetId of unknown) rows.push(kv("Unknown asset", h("span", { class: "mono wrap small" }, assetId)));
   rows.push(kv("Network fee", review.fee === "0" ? "None" : native === undefined ? `${review.fee} sat` : amountWithSymbol(review.fee, feeToken)));
   rows.push(kv("Network", networkName));
   rows.push(kv("Settlement", operation.kind === "swap_offer" && operation.needsSplit

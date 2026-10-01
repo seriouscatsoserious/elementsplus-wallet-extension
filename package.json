@@ -24,7 +24,8 @@
     "regtest:stop": "node scripts/regtest-stack.mjs stop",
     "preview": "node scripts/serve-preview.mjs",
     "check": "npm run typecheck && npm test && npm run test:build && npm run build",
-    "capture": "node scripts/capture-wallet-screens.mjs"
+    "capture": "node scripts/capture-wallet-screens.mjs",
+    "test:provider": "node scripts/provider-e2e.mjs"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
