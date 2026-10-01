@@ -1,44 +1,53 @@
 # Elements+ wallet core
 
-This crate is the smallest current **offline signing core** for the ECX Alpha
-browser-wallet prototype. It pins the audited LWK revision and ECX chain
-identity through `elementsplus-lwk-adapter` and supports only one conservative
-transaction shape:
+This crate is the **offline signing core** for the ECX Alpha browser wallet
+(spec: `docs/V2-SPEC.md` §1–§2). It pins the audited LWK revision and ECX chain
+identity through `elementsplus-lwk-adapter`.
 
 - BIP39 English 12-word mnemonic;
 - `m/84'/1'/0'/0/index` receive and `m/84'/1'/0'/1/index` change paths;
 - unconfidential P2WPKH (`elements1...`, with equivalent `ert1...` alias);
-- explicit ECX policy-asset inputs and outputs;
-- one recipient, optional wallet-owned change, and one explicit fee output.
+- explicit (non-confidential) inputs and outputs of **any asset**; the fee is
+  always one explicit policy-asset output.
 
-The core verifies caller-supplied UTXOs belong to the mnemonic, selects them in
-a deterministic outpoint order, builds a PSET, and produces a human review
-summary. `sign_prepared` reparses the PSET, independently recomputes the
-summary, and requires approval of a domain-separated SHA-256 commitment to the
-exact serialized PSET. It then uses the pinned LWK software signer, finalizes
-and verifies every P2WPKH witness, confirms no non-witness data changed, checks
-all outputs remain explicit, and returns raw transaction hex plus txid.
+Operations, each returning `PreparedTx { pset_base64, review, review_hash }`:
+`prepare_transfer`, `prepare_issuance` (explicit new issuance, contract hash
+over canonical sorted-key JSON), `prepare_offer_split`, `prepare_swap_offer`
+(maker, one whole UTXO, `SIGHASH_SINGLE|ANYONECANPAY`), `take_swap_offers`
+(taker, maker pairs at indices `0..n`, maker witnesses preserved, taker inputs
+`SIGHASH_ALL`), and `prepare_cancel`. Fees are computed from an upper-bound
+size estimate × `fee_rate` (1–1000 sat/vB), never supplied by the caller.
+
+Every operation produces one `TxReview` recomputed **from the PSET alone**:
+kind, per-asset net balance change (excluding fee), fee, outputs paying
+non-wallet scripts, inputs signed, foreign (maker) inputs, issuance details,
+and the sighash. A wallet input/output is one whose single BIP32 derivation
+under this wallet's fingerprint re-derives to its script; everything else is
+external. `review_hash = SHA256("ECX_ALPHA_TX_REVIEW_V2\0" ‖ PSET ‖ review
+JSON)`. `sign_prepared` re-parses the PSET, recomputes the review and hash,
+refuses any mismatch with the prepared review or the approved hash, signs
+only wallet inputs with the declared sighash via the pinned LWK signer,
+finalizes them itself (maker witnesses are never rebuilt), verifies every
+input signature against a recomputed sighash, and returns raw transaction hex
+— or, for swap offers, the signed offer JSON (§2).
+
+`decode_offer` verifies an offer against its funding transaction (which must
+hash to the offered txid) and the maker's 0x83 signature.
+`verify_asset_issuance` recomputes contract hash → entropy → asset/token ids
+from an issuance input.
 
 ## What this does not do
 
-This is not yet a complete wallet and deliberately makes no claim to be one.
-
 - It does not scan ECX headers, discover UTXOs, prove explorer responses,
-  estimate fees, track spends, or broadcast.
+  track spends, or broadcast.
 - `VerifiedUtxo` means *the caller* verified chain inclusion and spend status.
   The core checks ownership and transaction invariants, not chain state.
-- It does not support confidential addresses, issuance, peg-ins, arbitrary
-  scripts, multiple assets, or a DEX.
+- It does not support confidential addresses or blinded issuance,
+  reissuance, peg-ins, arbitrary scripts, or partial fills of an offer.
 - It does not resolve the current live-network deployment ambiguity: the old
   desktop release and current Elements+ `master` share genesis while differing
   in confidential-output policy. Explicit transactions are the safe common
   subset.
-
-Before real funds or public test coins are used, the sidechain maintainer must
-confirm the exact live validator commit/binaries and provide a supported
-funding/deposit route (or a funded sidechain UTXO). A scanner must also verify
-ECX's extended headers or the product must clearly disclose that it trusts the
-configured explorer.
 
 ## Verify
 
@@ -47,11 +56,12 @@ cargo test --locked
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The `headless` integration test uses only public BIP39 test vectors and
-synthetic outpoints. It proves mnemonic → native/alias address → deterministic
-multi-input PSET → review commitment → LWK signatures → final witnesses → raw
-transaction/txid, including mutation, foreign-script, and duplicate-input
-rejection. It does not broadcast.
+`tests/headless.rs` uses only public BIP39 test vectors and synthetic funding
+transactions. It covers every operation end-to-end (prepare → review → sign →
+decode) plus adversarial cases: wrong sighash, tampered offers, prevout txid
+mismatch, review and approval mismatch, overflow, foreign outputs disguised as
+change, foreign inputs, tampered maker witnesses, and issuance contract
+mismatch. It does not broadcast.
 
 `verify_raw_transaction` is the scanner's fail-closed local decoding boundary.
 Given an expected txid, raw consensus transaction hex, and expected wallet
@@ -59,21 +69,24 @@ vout/scripts, it recomputes the txid and returns only matching, fully explicit
 P2WPKH outputs with exact atomic `u64` values. It deliberately does not prove
 confirmation, inclusion, or unspent status.
 
-There is also an ignored, opt-in funded regtest test. It discovers the running
-node's genesis and policy asset, asks the node wallet to fund a core-derived
-address, signs a real child transaction in the core, broadcasts it through
-`elements-cli`, and verifies that exact txid entered the mempool:
+`tests/funded_elements.rs` holds ignored, opt-in tests against a real
+Elements+ regtest node started like `scripts/regtest-stack.mjs` (descriptor
+wallet `miner` with mined coins). With freshly generated mnemonics they fund
+wallets, then issue an asset, transfer it, split an exact output, make a
+maker offer, take it with a second wallet, cancel a second offer and prove the
+stale offer is rejected by `testmempoolaccept` — every transaction is
+broadcast and mined:
 
 ```sh
-ELEMENTS_CLI=/path/to/elements-cli \
+ELEMENTS_CLI=/path/to/elements-functional-test-cli \
 ELEMENTS_DATADIR=/path/to/disposable/regtest \
-ELEMENTS_RPCPORT=19843 \
-ELEMENTS_RPCWALLET=funding \
-cargo test --locked --test funded_elements -- --ignored --nocapture
+ELEMENTS_RPCPORT=19901 \
+cargo test --locked --test funded_elements -- --ignored --test-threads=1
 ```
 
 This spends disposable regtest coins and therefore refuses to run unless
-`ELEMENTS_DATADIR` is explicitly set.
+`ELEMENTS_DATADIR` is explicitly set (`ELEMENTS_CHAIN` defaults to
+`elementsregtest`, `ELEMENTS_RPCWALLET` to `miner`).
 
 For a browser build, install the Rust WASM target and compile the optional JSON
 wrapper:
