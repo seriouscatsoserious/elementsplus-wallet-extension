@@ -69,6 +69,37 @@ as external.
 Prevouts for maker inputs are never taken from the offer alone: callers pass
 the raw funding tx, verified locally by txid.
 
+### 1.3 WASM surface (`src/wasm/elementsplus_wallet_core.d.ts`)
+
+All request/response JSON is snake_case, amounts as decimal strings except
+`fee`/`fee_rate` numbers are allowed (integers). Existing
+`verify_raw_transaction_json` keeps its camelCase shape.
+
+```ts
+export function generate_mnemonic(): string;
+export function validate_mnemonic(m: string): boolean;
+export function verify_asset_issuance_json(req: string): string; // {asset_id, token_id|null, contract_hash}
+export function decode_offer_json(offer: string, prevout_raw_tx_hex: string): string; // DecodedOffer
+export class WasmWalletCore {
+  constructor(mnemonic: string);
+  static forRegtest?(mnemonic: string, genesisHash: string, policyAsset: string, displayName: string): WasmWalletCore;
+  derive_address_json(branch: string, index: number): string;
+  verify_raw_transaction_json(req: string): string;
+  prepare_transfer_json(req: string): string;   // PreparedTx
+  prepare_issuance_json(req: string): string;
+  prepare_offer_split_json(req: string): string;
+  prepare_swap_offer_json(req: string): string;
+  take_swap_offers_json(req: string): string;   // req.offers: [{ offer, prevout_raw_tx_hex }]
+  prepare_cancel_json(req: string): string;
+  sign_prepared_json(prepared: string, approved_review_hash: string): string;
+  // → { txid, review_hash, raw_tx_hex?: string, offer?: Offer }
+  free(): void;
+}
+```
+
+`utxos` entries keep the existing `VerifiedUtxo` shape (`txid, vout, value,
+asset_id, script_pubkey_hex, branch, index`) but any asset is accepted.
+
 ## 2. Swap offer format (LiquiDEX-style, explicit)
 
 ```json
