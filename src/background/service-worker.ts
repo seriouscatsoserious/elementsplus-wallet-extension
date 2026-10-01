@@ -92,7 +92,17 @@ const router = new ProviderRouter({
     } catch {
       // Default placement.
     }
-    const created = await api.windows.create({ url, type: "popup", width: APPROVAL_WIDTH, height: APPROVAL_HEIGHT, focused: true, ...position });
+    const options = { url, type: "popup" as const, width: APPROVAL_WIDTH, height: APPROVAL_HEIGHT, focused: true };
+    let created;
+    try {
+      created = await api.windows.create({ ...options, ...position });
+    } catch (error) {
+      // Chrome rejects bounds that are not mostly on a visible display (e.g.
+      // the focused window is larger than, or partly off, the screen). The
+      // placement is cosmetic: fall back to the browser's default position.
+      if (position.left === undefined) throw error;
+      created = await api.windows.create(options);
+    }
     return created.id;
   },
   closeWindow: (windowId) => {
