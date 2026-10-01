@@ -8,9 +8,14 @@ export default function init(moduleOrPath?: InitInput | Promise<InitInput>): Pro
 
 export function initSync(module: { readonly module: BufferSource | WebAssembly.Module }): InitOutput;
 
+// All request/response JSON is snake_case. Amounts are decimal strings of
+// atomic units; `fee` / `fee_rate` are integers. See docs/V2-SPEC.md §1.3.
 export function generate_mnemonic(): string;
 export function validate_mnemonic(mnemonic: string): boolean;
-export function verify_preconfirmation_receipt(configJson: string, receiptJson: string): boolean;
+/** `{raw_tx_hex, expected_txid, vin, contract}` → `{asset_id, token_id|null, contract_hash}`. */
+export function verify_asset_issuance_json(requestJson: string): string;
+/** Verifies against the pinned ECX Alpha genesis → DecodedOffer JSON. */
+export function decode_offer_json(offerJson: string, prevoutRawTxHex: string): string;
 
 export class WasmWalletCore {
   constructor(mnemonic: string);
@@ -21,8 +26,19 @@ export class WasmWalletCore {
     displayName: string,
   ): WasmWalletCore;
   derive_address_json(branch: string, index: number): string;
-  prepare_send_json(requestJson: string): string;
-  sign_prepared_json(preparedJson: string, approvedReviewHash: string): string;
+  /** camelCase request/response, unchanged from v1. */
   verify_raw_transaction_json(requestJson: string): string;
+  /** Each prepare_* returns PreparedTx JSON `{pset_base64, review, review_hash}`. */
+  prepare_transfer_json(requestJson: string): string;
+  prepare_issuance_json(requestJson: string): string;
+  prepare_offer_split_json(requestJson: string): string;
+  prepare_swap_offer_json(requestJson: string): string;
+  /** `req.offers: [{ offer, prevout_raw_tx_hex }]`; `offer` may be an object or its JSON string. */
+  take_swap_offers_json(requestJson: string): string;
+  prepare_cancel_json(requestJson: string): string;
+  /** → `{ txid, review_hash, raw_tx_hex?: string, offer?: Offer }` */
+  sign_prepared_json(preparedJson: string, approvedReviewHash: string): string;
+  /** Like the free `decode_offer_json`, but against this wallet's network (useful on regtest). */
+  decode_offer_json(offerJson: string, prevoutRawTxHex: string): string;
   free(): void;
 }

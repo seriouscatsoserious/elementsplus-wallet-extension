@@ -2,47 +2,71 @@
 //!
 //! The crate owns no network client and trusts no explorer response by itself.
 //! A caller supplies UTXOs that it has independently verified; this core then
-//! verifies that they are explicit policy-asset P2WPKH outputs owned by the
-//! mnemonic, constructs a deterministic PSET, binds the exact PSET to a review
-//! hash, signs only after that hash is approved, finalizes, and validates the
-//! resulting wire transaction. Scanning and broadcasting stay outside this
-//! security boundary.
+//! verifies that they are explicit P2WPKH outputs owned by the mnemonic,
+//! constructs a deterministic PSET, recomputes a single [`TxReview`] from the
+//! PSET, binds the exact PSET and review to a review hash, signs only after
+//! that hash is approved, finalizes, and validates the resulting transaction.
+//! Scanning and broadcasting stay outside this security boundary.
+//!
+//! Supported operations (spec §1.2): multi-asset transfers, explicit asset
+//! issuance, offer splits, LiquiDEX-style explicit swap offers (maker) and
+//! takes (taker), and offer cancellation.
 
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use bech32::segwit;
-use elements::bitcoin::bip32::DerivationPath;
+use elements::bitcoin::bip32::{ChildNumber, DerivationPath};
 use elements::bitcoin::PublicKey;
 use elements::confidential::{Asset, Nonce, Value};
-use elements::encode::{deserialize, serialize};
-use elements::hashes::{sha256, Hash, HashEngine};
-use elements::pset::{Input, Output, PartiallySignedTransaction};
-use elements::secp256k1_zkp::Secp256k1;
+use elements::encode::deserialize;
+use elements::hashes::Hash;
 use elements::{
-    Address, AddressParams, AssetId, BlockHash, OutPoint, Script, Sequence, Transaction,
-    TxInWitness, TxOut, TxOutWitness, Txid, WPubkeyHash,
+    Address, AddressParams, AssetId, BlockHash, OutPoint, Script, Transaction, TxOut, TxOutWitness,
+    Txid, WPubkeyHash,
 };
-use elements_miniscript::psbt::finalize;
-use elementsplus_lwk_adapter::{
-    lwk_network, preview_explicit_pset, validate_explicit_transaction, NATIVE_ADDRESS_PARAMS,
-};
+use elementsplus_lwk_adapter::{lwk_network, NATIVE_ADDRESS_PARAMS};
 pub use elementsplus_lwk_adapter::{GENESIS_HASH, NETWORK_NAME, POLICY_ASSET};
 #[cfg(feature = "regtest")]
 use lwk_common::ElementsParamsBuilder;
-use lwk_common::{get_genesis_hash, set_genesis_hash, Network, Signer};
+use lwk_common::{Network, Signer};
 use lwk_signer::bip39::{Language, Mnemonic};
 use lwk_signer::SwSigner;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod amount;
+mod build;
+pub mod issuance;
+pub mod offer;
+mod review;
+mod sign;
+#[cfg(feature = "wasm")]
+mod wasm;
+
+pub use build::{
+    CancelRequest, IssuanceRequest, OfferInput, OfferSplitRequest, SwapOfferRequest,
+    TakeOfferInput, TakeSwapOffersRequest, TransferRequest, MAX_FEE_RATE, POLICY_DUST_LIMIT,
+};
+pub use issuance::{
+    verify_asset_issuance, AssetContract, AssetIssuanceVerificationRequest, VerifiedAssetIssuance,
+    MAX_MONEY,
+};
+pub use offer::{DecodedOffer, Offer, OfferLeg, OFFER_NETWORK, OFFER_VERSION};
+pub use review::{
+    AssetDelta, ExternalOutput, IssuanceReview, PreparedTx, SignedResult, TxKind, TxReview,
+    SIGHASH_ALL, SIGHASH_SINGLE_ACP,
+};
+
 /// The sole derivation scheme supported by this core.
 pub const DERIVATION_ACCOUNT: &str = "m/84'/1'/0'";
 /// Domain separator for review commitments. Changing review semantics requires
 /// a new version rather than silently reusing an approval.
-pub const REVIEW_DOMAIN: &[u8] = b"ECX_ALPHA_EXPLICIT_SEND_REVIEW_V1\0";
+pub const REVIEW_DOMAIN: &[u8] = b"ECX_ALPHA_TX_REVIEW_V2\0";
 /// Hard ceiling for untrusted raw transaction responses passed into WASM.
 pub const MAX_RAW_TRANSACTION_BYTES: usize = 4_000_000;
+/// Hard ceiling for request JSON accepted by the WASM boundary.
+pub const MAX_REQUEST_JSON_BYTES: usize = 8_000_000;
 
 /// Errors are intentionally descriptive but never contain mnemonic material.
 #[derive(Debug, Error)]
@@ -59,20 +83,28 @@ pub enum WalletError {
     InvalidUtxo { outpoint: String, reason: String },
     #[error("duplicate UTXO {0}")]
     DuplicateUtxo(String),
-    #[error("amount and fee must both be non-zero")]
+    #[error("amount must be non-zero")]
     ZeroAmount,
     #[error("amount overflow")]
     AmountOverflow,
-    #[error("insufficient funds: need {needed}, have {available}")]
-    InsufficientFunds { needed: u64, available: u64 },
+    #[error("invalid fee rate: {0}")]
+    InvalidFeeRate(String),
+    #[error("insufficient funds for asset {asset}: need {needed}, have {available}")]
+    InsufficientFunds {
+        asset: String,
+        needed: u64,
+        available: u64,
+    },
+    #[error("invalid request: {0}")]
+    InvalidRequest(String),
     #[error("PSET is malformed: {0}")]
     InvalidPset(String),
     #[error("review summary does not match the PSET")]
     ReviewMismatch,
     #[error("approved review hash does not match the PSET")]
     ApprovalMismatch,
-    #[error("signer produced {0} signature(s), expected one per input")]
-    SignatureCount(u32),
+    #[error("signer produced {actual} signature(s), expected {expected}")]
+    SignatureCount { actual: u32, expected: usize },
     #[error("signing failed: {0}")]
     Signing(String),
     #[error("finalization failed: {0}")]
@@ -81,6 +113,10 @@ pub enum WalletError {
     FinalTransaction(String),
     #[error("raw transaction verification failed: {0}")]
     RawTransaction(String),
+    #[error("swap offer rejected: {0}")]
+    Offer(String),
+    #[error("asset issuance rejected: {0}")]
+    Issuance(String),
     #[error("JSON request is invalid: {0}")]
     Json(String),
 }
@@ -116,59 +152,20 @@ pub struct DerivedAddress {
 /// A UTXO supplied by a chain source outside this crate.
 ///
 /// "Verified" means the caller has verified existence, confirmation status,
-/// and non-spent status. This core still verifies the asset, amount, script,
-/// ownership path, duplicates, and all transaction conservation rules.
+/// and non-spent status. This core still verifies the asset id syntax,
+/// amount, script, ownership path, duplicates, and all transaction
+/// conservation rules. Any explicit asset is accepted.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct VerifiedUtxo {
     pub txid: String,
     pub vout: u32,
+    #[serde(with = "amount::string")]
     pub value: u64,
     pub asset_id: String,
     pub script_pubkey_hex: String,
     pub branch: Branch,
     pub index: u32,
-}
-
-/// A single-policy-asset payment request.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SendRequest {
-    pub recipient: String,
-    pub amount: u64,
-    pub fee: u64,
-    pub change_index: u32,
-    pub utxos: Vec<VerifiedUtxo>,
-}
-
-/// Human-reviewable facts recomputed from the PSET before signing.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ReviewSummary {
-    pub network: String,
-    pub genesis_hash: String,
-    pub policy_asset: String,
-    pub recipient_native_address: String,
-    pub amount: u64,
-    pub fee: u64,
-    pub change: u64,
-    pub change_native_address: Option<String>,
-    pub total_input: u64,
-    pub input_count: usize,
-    pub selected_outpoints: Vec<String>,
-}
-
-/// Exact unsigned PSET plus its independently reviewable commitment.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct PreparedSend {
-    pub pset_base64: String,
-    pub review: ReviewSummary,
-    pub review_hash: String,
-}
-
-/// Final result ready for a separate broadcaster.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SignedTransaction {
-    pub raw_tx_hex: String,
-    pub txid: String,
-    pub review_hash: String,
 }
 
 /// One wallet output the scanner expects to find in an untrusted raw
@@ -189,9 +186,7 @@ pub struct RawTransactionVerificationRequest {
     pub expected_wallet_outputs: Vec<ExpectedWalletOutput>,
 }
 
-/// A locally decoded, fully explicit output. Atomic amounts stay as `u64` in
-/// Rust; the WASM JSON wrapper serializes the same type without floating-point
-/// arithmetic.
+/// A locally decoded, fully explicit output.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifiedExplicitOutput {
@@ -289,24 +284,40 @@ pub fn verify_raw_transaction(
     })
 }
 
+/// Decode and verify a swap offer for the pinned ECX Alpha network.
+///
+/// The funding transaction is supplied separately and must hash to the
+/// offered input's txid; the maker's `SIGHASH_SINGLE|ANYONECANPAY` signature
+/// is verified against the recomputed segwit v0 sighash.
+pub fn decode_offer(
+    offer_json: &str,
+    prevout_raw_tx_hex: &str,
+) -> Result<DecodedOffer, WalletError> {
+    let offer = offer::parse_offer_json(offer_json)?;
+    let genesis = BlockHash::from_str(GENESIS_HASH).expect("frozen genesis hash");
+    offer::verify_offer(&offer, prevout_raw_tx_hex, genesis, &NATIVE_ADDRESS_PARAMS)
+        .map(|verified| verified.decoded)
+}
+
 #[derive(Clone)]
-struct ParsedUtxo {
-    outpoint: OutPoint,
-    value: u64,
-    script: Script,
-    public_key: PublicKey,
-    path: DerivationPath,
+pub(crate) struct ParsedUtxo {
+    pub outpoint: OutPoint,
+    pub asset: AssetId,
+    pub value: u64,
+    pub script: Script,
+    pub public_key: PublicKey,
+    pub path: DerivationPath,
 }
 
 /// An in-memory software wallet. Debug output is deliberately not implemented.
 pub struct WalletCore {
-    signer: SwSigner,
-    network: Network,
-    network_name: String,
-    policy_asset: AssetId,
-    genesis_hash: BlockHash,
-    native_address_params: &'static AddressParams,
-    alias_address_params: &'static AddressParams,
+    pub(crate) signer: SwSigner,
+    pub(crate) network: Network,
+    pub(crate) network_name: String,
+    pub(crate) policy_asset: AssetId,
+    pub(crate) genesis_hash: BlockHash,
+    pub(crate) native_address_params: &'static AddressParams,
+    pub(crate) alias_address_params: &'static AddressParams,
 }
 
 impl WalletCore {
@@ -338,7 +349,7 @@ impl WalletCore {
 
     /// Construct the same signing engine for an explicitly supplied Elements
     /// network. This native-only seam exists for funded regtest integration
-    /// tests; the browser/WASM API intentionally exposes ECX Alpha only.
+    /// tests; the production browser/WASM API exposes ECX Alpha only.
     pub fn new_for_network(
         mnemonic: &str,
         network: Network,
@@ -360,7 +371,49 @@ impl WalletCore {
         })
     }
 
-    /// Derive a native ECX address and the equivalent generic-Elements alias.
+    /// Construct a wallet for a disposable regtest chain (feature `regtest`).
+    #[cfg(feature = "regtest")]
+    pub fn new_for_regtest(
+        mnemonic: &str,
+        genesis_hash: &str,
+        policy_asset: &str,
+        display_name: &str,
+    ) -> Result<Self, WalletError> {
+        let genesis_hash = BlockHash::from_str(genesis_hash)
+            .map_err(|_| WalletError::InvalidRequest("invalid regtest genesis hash".into()))?;
+        let policy_asset = AssetId::from_str(policy_asset)
+            .map_err(|_| WalletError::InvalidRequest("invalid regtest policy asset".into()))?;
+        let parent_genesis = Network::default_regtest().parent_genesis_hash();
+        let network = Network::CustomElements(
+            ElementsParamsBuilder::new()
+                .with_genesis_hash(genesis_hash)
+                .with_policy_asset(policy_asset)
+                .with_parent_genesis_hash(parent_genesis)
+                .build()
+                .map_err(|_| {
+                    WalletError::InvalidRequest("invalid regtest network parameters".into())
+                })?,
+        );
+        Self::new_for_network(
+            mnemonic,
+            network,
+            display_name,
+            &AddressParams::ELEMENTS,
+            &AddressParams::ELEMENTS,
+        )
+    }
+
+    /// The configured policy (fee) asset.
+    pub fn policy_asset(&self) -> AssetId {
+        self.policy_asset
+    }
+
+    /// The configured genesis hash.
+    pub fn genesis_hash(&self) -> BlockHash {
+        self.genesis_hash
+    }
+
+    /// Derive a native address and the equivalent generic-Elements alias.
     pub fn derive_address(
         &self,
         branch: Branch,
@@ -386,157 +439,26 @@ impl WalletCore {
         })
     }
 
-    /// Deterministically select owned UTXOs and construct an explicit PSET.
-    pub fn prepare_send(&self, request: SendRequest) -> Result<PreparedSend, WalletError> {
-        if request.amount == 0 || request.fee == 0 {
-            return Err(WalletError::ZeroAmount);
-        }
-        let target = request
-            .amount
-            .checked_add(request.fee)
-            .ok_or(WalletError::AmountOverflow)?;
-        let recipient_script = self.parse_recipient(&request.recipient)?;
-
-        let mut candidates = request
-            .utxos
-            .iter()
-            .map(|utxo| self.parse_and_verify_utxo(utxo))
-            .collect::<Result<Vec<_>, _>>()?;
-        candidates.sort_by_key(|utxo| (utxo.outpoint.txid.to_string(), utxo.outpoint.vout));
-
-        let mut dedupe = BTreeSet::new();
-        for utxo in &candidates {
-            let key = utxo.outpoint.to_string();
-            if !dedupe.insert(key.clone()) {
-                return Err(WalletError::DuplicateUtxo(key));
-            }
-        }
-
-        let mut selected = Vec::new();
-        let mut total_input = 0u64;
-        for candidate in candidates {
-            if total_input >= target {
-                break;
-            }
-            total_input = total_input
-                .checked_add(candidate.value)
-                .ok_or(WalletError::AmountOverflow)?;
-            selected.push(candidate);
-        }
-        if total_input < target {
-            return Err(WalletError::InsufficientFunds {
-                needed: target,
-                available: total_input,
-            });
-        }
-
-        let change = total_input - target;
-        let mut pset = PartiallySignedTransaction::new_v2();
-        for utxo in &selected {
-            let mut input = Input::from_prevout(utxo.outpoint);
-            input.sequence = Some(Sequence::MAX);
-            input.witness_utxo = Some(explicit_output(
-                self.policy_asset,
-                utxo.value,
-                utxo.script.clone(),
-            ));
-            input.asset = Some(self.policy_asset);
-            input.amount = Some(utxo.value);
-            input.bip32_derivation.insert(
-                utxo.public_key,
-                (self.signer.fingerprint(), utxo.path.clone()),
-            );
-            pset.add_input(input);
-        }
-
-        pset.add_output(Output::from_txout(explicit_output(
-            self.policy_asset,
-            request.amount,
-            recipient_script,
-        )));
-
-        if change > 0 {
-            let change_path = derivation_path(Branch::Change, request.change_index)?;
-            let change_key = self.derived_pubkey(&change_path)?;
-            let change_script = p2wpkh_script(&change_key);
-            let mut output =
-                Output::from_txout(explicit_output(self.policy_asset, change, change_script));
-            output
-                .bip32_derivation
-                .insert(change_key, (self.signer.fingerprint(), change_path));
-            pset.add_output(output);
-        }
-
-        pset.add_output(Output::from_txout(explicit_output(
-            self.policy_asset,
-            request.fee,
-            Script::new(),
-        )));
-        set_genesis_hash(&mut pset, &self.network);
-
-        let review = self.review_pset(&pset)?;
-        let review_hash = self.review_commitment(&pset);
-        Ok(PreparedSend {
-            pset_base64: pset.to_string(),
-            review,
-            review_hash,
-        })
-    }
-
-    /// Recompute all review facts, require explicit approval of the exact PSET,
-    /// sign/finalize it, and return raw transaction bytes without broadcasting.
-    pub fn sign_prepared(
+    /// Decode and verify an offer for this wallet's configured network.
+    pub fn decode_offer(
         &self,
-        prepared: &PreparedSend,
-        approved_review_hash: &str,
-    ) -> Result<SignedTransaction, WalletError> {
-        let mut pset = PartiallySignedTransaction::from_str(&prepared.pset_base64)
-            .map_err(|e| WalletError::InvalidPset(e.to_string()))?;
-        let actual_review = self.review_pset(&pset)?;
-        if actual_review != prepared.review {
-            return Err(WalletError::ReviewMismatch);
-        }
-        let actual_hash = self.review_commitment(&pset);
-        if actual_hash != prepared.review_hash || actual_hash != approved_review_hash {
-            return Err(WalletError::ApprovalMismatch);
-        }
-
-        let unsigned_tx = pset
-            .extract_tx()
-            .map_err(|e| WalletError::InvalidPset(e.to_string()))?;
-        let signatures = self
-            .signer
-            .sign(&mut pset)
-            .map_err(|e| WalletError::Signing(e.to_string()))?;
-        if signatures as usize != pset.inputs().len() {
-            return Err(WalletError::SignatureCount(signatures));
-        }
-
-        let secp = Secp256k1::verification_only();
-        finalize(&mut pset, &secp, self.genesis_hash)
-            .map_err(|e| WalletError::Finalization(e.to_string()))?;
-        let tx = pset
-            .extract_tx()
-            .map_err(|e| WalletError::Finalization(e.to_string()))?;
-        self.validate_final_transaction(&unsigned_tx, &tx)?;
-
-        let raw = serialize(&tx);
-        let roundtrip: Transaction =
-            deserialize(&raw).map_err(|e| WalletError::FinalTransaction(e.to_string()))?;
-        if roundtrip != tx {
-            return Err(WalletError::FinalTransaction(
-                "wire roundtrip changed the transaction".into(),
-            ));
-        }
-
-        Ok(SignedTransaction {
-            raw_tx_hex: hex::encode(raw),
-            txid: tx.txid().to_string(),
-            review_hash: actual_hash,
-        })
+        offer_json: &str,
+        prevout_raw_tx_hex: &str,
+    ) -> Result<DecodedOffer, WalletError> {
+        let offer = offer::parse_offer_json(offer_json)?;
+        offer::verify_offer(
+            &offer,
+            prevout_raw_tx_hex,
+            self.genesis_hash,
+            self.native_address_params,
+        )
+        .map(|verified| verified.decoded)
     }
 
-    fn parse_and_verify_utxo(&self, utxo: &VerifiedUtxo) -> Result<ParsedUtxo, WalletError> {
+    pub(crate) fn parse_and_verify_utxo(
+        &self,
+        utxo: &VerifiedUtxo,
+    ) -> Result<ParsedUtxo, WalletError> {
         let label = format!("{}:{}", utxo.txid, utxo.vout);
         let invalid = |reason: &str| WalletError::InvalidUtxo {
             outpoint: label.clone(),
@@ -546,10 +468,10 @@ impl WalletCore {
         if utxo.value == 0 {
             return Err(invalid("zero value"));
         }
-        let asset = AssetId::from_str(&utxo.asset_id).map_err(|_| invalid("invalid asset id"))?;
-        if asset != self.policy_asset {
-            return Err(invalid("not the pinned policy asset"));
+        if utxo.value > MAX_MONEY {
+            return Err(invalid("value exceeds the money range"));
         }
+        let asset = AssetId::from_str(&utxo.asset_id).map_err(|_| invalid("invalid asset id"))?;
         let path = derivation_path(utxo.branch, utxo.index)
             .map_err(|_| invalid("invalid ownership path"))?;
         let public_key = self
@@ -564,6 +486,7 @@ impl WalletCore {
         }
         Ok(ParsedUtxo {
             outpoint: OutPoint::new(txid, utxo.vout),
+            asset,
             value: utxo.value,
             script: supplied_script,
             public_key,
@@ -571,204 +494,25 @@ impl WalletCore {
         })
     }
 
-    fn review_pset(&self, pset: &PartiallySignedTransaction) -> Result<ReviewSummary, WalletError> {
-        validate_minimal_unsigned_pset(pset)?;
-        if get_genesis_hash(pset) != Some(self.genesis_hash) {
-            return Err(WalletError::InvalidPset(
-                "PSET genesis does not match the configured network".into(),
-            ));
-        }
-        preview_explicit_pset(pset, self.policy_asset)
-            .map_err(|e| WalletError::InvalidPset(e.to_string()))?;
-        if pset.inputs().is_empty() {
-            return Err(WalletError::InvalidPset("no inputs".into()));
-        }
-        if pset.outputs().len() != 2 && pset.outputs().len() != 3 {
-            return Err(WalletError::InvalidPset(
-                "send must contain recipient, optional change, and fee".into(),
-            ));
-        }
-
-        let mut total_input = 0u64;
-        let mut selected_outpoints = Vec::with_capacity(pset.inputs().len());
-        let mut seen = BTreeSet::new();
-        for input in pset.inputs() {
-            let outpoint = OutPoint::new(input.previous_txid, input.previous_output_index);
-            let outpoint_label = outpoint.to_string();
-            if !seen.insert(outpoint_label.clone()) {
-                return Err(WalletError::DuplicateUtxo(outpoint_label));
-            }
-            let witness = input
-                .witness_utxo
-                .as_ref()
-                .ok_or_else(|| WalletError::InvalidPset("input lacks witness UTXO".into()))?;
-            let (Asset::Explicit(asset), Value::Explicit(value), Nonce::Null) =
-                (witness.asset, witness.value, witness.nonce)
-            else {
-                return Err(WalletError::InvalidPset(
-                    "input UTXO is not fully explicit".into(),
-                ));
-            };
-            if asset != self.policy_asset
-                || input.asset != Some(asset)
-                || input.amount != Some(value)
-                || !witness.script_pubkey.is_v0_p2wpkh()
-            {
-                return Err(WalletError::InvalidPset(
-                    "input asset, amount, or script is inconsistent".into(),
-                ));
-            }
-            if input.bip32_derivation.len() != 1 {
-                return Err(WalletError::InvalidPset(
-                    "input must have exactly one ownership path".into(),
-                ));
-            }
-            let (public_key, (fingerprint, path)) = input
-                .bip32_derivation
-                .iter()
-                .next()
-                .expect("length checked");
-            if *fingerprint != self.signer.fingerprint()
-                || self.derived_pubkey(path)? != *public_key
-                || p2wpkh_script(public_key) != witness.script_pubkey
-                || !is_wallet_path(path)
-            {
-                return Err(WalletError::InvalidPset(
-                    "input ownership proof does not match this wallet".into(),
-                ));
-            }
-            total_input = total_input
-                .checked_add(value)
-                .ok_or(WalletError::AmountOverflow)?;
-            selected_outpoints.push(outpoint_label);
-        }
-
-        let recipient = &pset.outputs()[0];
-        let recipient_amount = recipient
-            .amount
-            .ok_or_else(|| WalletError::InvalidPset("recipient amount missing".into()))?;
-        if recipient_amount == 0
-            || recipient.script_pubkey.is_empty()
-            || recipient.asset != Some(self.policy_asset)
-        {
-            return Err(WalletError::InvalidPset("invalid recipient output".into()));
-        }
-        let recipient_native_address =
-            native_address(&recipient.script_pubkey, self.native_address_params)?;
-
-        let fee_output = pset
-            .outputs()
-            .last()
-            .ok_or_else(|| WalletError::InvalidPset("fee output missing".into()))?;
-        if !fee_output.script_pubkey.is_empty()
-            || fee_output.asset != Some(self.policy_asset)
-            || fee_output.amount.unwrap_or(0) == 0
-        {
-            return Err(WalletError::InvalidPset("invalid fee output".into()));
-        }
-        let fee = fee_output.amount.expect("checked");
-
-        let (change, change_native_address) = if pset.outputs().len() == 3 {
-            let output = &pset.outputs()[1];
-            let amount = output
-                .amount
-                .ok_or_else(|| WalletError::InvalidPset("change amount missing".into()))?;
-            if amount == 0
-                || output.asset != Some(self.policy_asset)
-                || output.bip32_derivation.len() != 1
-            {
-                return Err(WalletError::InvalidPset("invalid change output".into()));
-            }
-            let (public_key, (fingerprint, path)) = output
-                .bip32_derivation
-                .iter()
-                .next()
-                .expect("length checked");
-            if *fingerprint != self.signer.fingerprint()
-                || self.derived_pubkey(path)? != *public_key
-                || p2wpkh_script(public_key) != output.script_pubkey
-                || !is_change_path(path)
-            {
-                return Err(WalletError::InvalidPset(
-                    "change does not belong to the wallet change branch".into(),
-                ));
-            }
-            (
-                amount,
-                Some(native_address(
-                    &output.script_pubkey,
-                    self.native_address_params,
-                )?),
-            )
-        } else {
-            (0, None)
-        };
-
-        let total_output = recipient_amount
-            .checked_add(change)
-            .and_then(|v| v.checked_add(fee))
-            .ok_or(WalletError::AmountOverflow)?;
-        if total_input != total_output {
-            return Err(WalletError::InvalidPset(format!(
-                "policy asset is not conserved: inputs {total_input}, outputs {total_output}"
-            )));
-        }
-
-        Ok(ReviewSummary {
-            network: self.network_name.clone(),
-            genesis_hash: self.genesis_hash.to_string(),
-            policy_asset: self.policy_asset.to_string(),
-            recipient_native_address,
-            amount: recipient_amount,
-            fee,
-            change,
-            change_native_address,
-            total_input,
-            input_count: pset.inputs().len(),
-            selected_outpoints,
-        })
-    }
-
-    fn derived_pubkey(&self, path: &DerivationPath) -> Result<PublicKey, WalletError> {
+    pub(crate) fn derived_pubkey(&self, path: &DerivationPath) -> Result<PublicKey, WalletError> {
         self.signer
             .derive_xpub(path)
             .map(|xpub| PublicKey::new(xpub.public_key))
             .map_err(|_| WalletError::InvalidDerivation)
     }
 
-    fn validate_final_transaction(
+    /// Script, pubkey, and path of a wallet address.
+    pub(crate) fn wallet_key(
         &self,
-        unsigned: &Transaction,
-        signed: &Transaction,
-    ) -> Result<(), WalletError> {
-        validate_explicit_transaction(signed)
-            .map_err(|e| WalletError::FinalTransaction(e.to_string()))?;
-        if unsigned.version != signed.version
-            || unsigned.lock_time != signed.lock_time
-            || unsigned.output != signed.output
-            || unsigned.input.len() != signed.input.len()
-        {
-            return Err(WalletError::FinalTransaction(
-                "signing changed non-witness transaction data".into(),
-            ));
-        }
-        for (before, after) in unsigned.input.iter().zip(&signed.input) {
-            if before.previous_output != after.previous_output
-                || before.sequence != after.sequence
-                || before.is_pegin != after.is_pegin
-                || before.asset_issuance != after.asset_issuance
-                || !after.script_sig.is_empty()
-                || after.witness.script_witness.len() != 2
-            {
-                return Err(WalletError::FinalTransaction(
-                    "final input structure is not the expected P2WPKH spend".into(),
-                ));
-            }
-        }
-        Ok(())
+        branch: Branch,
+        index: u32,
+    ) -> Result<(Script, PublicKey, DerivationPath), WalletError> {
+        let path = derivation_path(branch, index)?;
+        let key = self.derived_pubkey(&path)?;
+        Ok((p2wpkh_script(&key), key, path))
     }
 
-    fn parse_recipient(&self, recipient: &str) -> Result<Script, WalletError> {
+    pub(crate) fn parse_recipient(&self, recipient: &str) -> Result<Script, WalletError> {
         if recipient != recipient.to_ascii_lowercase() {
             return Err(WalletError::InvalidRecipient(
                 "address must use canonical lowercase encoding",
@@ -790,18 +534,9 @@ impl WalletCore {
         bytes.extend(program);
         Ok(Script::from(bytes))
     }
-
-    fn review_commitment(&self, pset: &PartiallySignedTransaction) -> String {
-        let mut engine = sha256::Hash::engine();
-        engine.input(REVIEW_DOMAIN);
-        engine.input(self.genesis_hash.as_ref());
-        engine.input(&self.policy_asset.into_inner().to_byte_array());
-        engine.input(&serialize(pset));
-        sha256::Hash::from_engine(engine).to_string()
-    }
 }
 
-fn derivation_path(branch: Branch, index: u32) -> Result<DerivationPath, WalletError> {
+pub(crate) fn derivation_path(branch: Branch, index: u32) -> Result<DerivationPath, WalletError> {
     // BIP32 forbids indices with the hardened bit set in a normal child.
     if index >= (1 << 31) {
         return Err(WalletError::InvalidDerivation);
@@ -814,44 +549,28 @@ fn derivation_path(branch: Branch, index: u32) -> Result<DerivationPath, WalletE
     .map_err(|_| WalletError::InvalidDerivation)
 }
 
-fn is_wallet_path(path: &DerivationPath) -> bool {
-    derivation_path_from_existing(path)
-        .map(|(branch, _)| branch == Branch::External || branch == Branch::Change)
-        .unwrap_or(false)
-}
-
-fn is_change_path(path: &DerivationPath) -> bool {
-    derivation_path_from_existing(path)
-        .map(|(branch, _)| branch == Branch::Change)
-        .unwrap_or(false)
-}
-
-fn derivation_path_from_existing(path: &DerivationPath) -> Option<(Branch, u32)> {
+/// Accept only paths of the exact form `m/84'/1'/0'/{0,1}/i`.
+pub(crate) fn is_wallet_path(path: &DerivationPath) -> bool {
     let children = path.as_ref();
     if children.len() != 5 {
-        return None;
+        return false;
     }
     let branch = match children[3] {
-        elements::bitcoin::bip32::ChildNumber::Normal { index: 0 } => Branch::External,
-        elements::bitcoin::bip32::ChildNumber::Normal { index: 1 } => Branch::Change,
-        _ => return None,
+        ChildNumber::Normal { index: 0 } => Branch::External,
+        ChildNumber::Normal { index: 1 } => Branch::Change,
+        _ => return false,
     };
-    let index = match children[4] {
-        elements::bitcoin::bip32::ChildNumber::Normal { index } => index,
-        _ => return None,
+    let ChildNumber::Normal { index } = children[4] else {
+        return false;
     };
-    if derivation_path(branch, index).ok().as_ref() == Some(path) {
-        Some((branch, index))
-    } else {
-        None
-    }
+    derivation_path(branch, index).ok().as_ref() == Some(path)
 }
 
-fn p2wpkh_script(public_key: &PublicKey) -> Script {
+pub(crate) fn p2wpkh_script(public_key: &PublicKey) -> Script {
     Script::new_v0_wpkh(&WPubkeyHash::hash(&public_key.to_bytes()))
 }
 
-fn explicit_output(asset: AssetId, value: u64, script_pubkey: Script) -> TxOut {
+pub(crate) fn explicit_output(asset: AssetId, value: u64, script_pubkey: Script) -> TxOut {
     TxOut {
         asset: Asset::Explicit(asset),
         value: Value::Explicit(value),
@@ -861,239 +580,7 @@ fn explicit_output(asset: AssetId, value: u64, script_pubkey: Script) -> TxOut {
     }
 }
 
-fn validate_minimal_unsigned_pset(pset: &PartiallySignedTransaction) -> Result<(), WalletError> {
-    let global = &pset.global;
-    if global.version != 2
-        || global.tx_data.version != 2
-        || global.tx_data.fallback_locktime.is_some()
-        || global.tx_data.tx_modifiable.is_some()
-        || !global.xpub.is_empty()
-        || !global.scalars.is_empty()
-        || global.elements_tx_modifiable_flag.is_some()
-        || global.proprietary.len() != 1
-        || !global.unknown.is_empty()
-    {
-        return Err(WalletError::InvalidPset(
-            "unsupported or mutable global PSET fields".into(),
-        ));
-    }
-
-    let unsigned = pset
-        .extract_tx()
-        .map_err(|e| WalletError::InvalidPset(e.to_string()))?;
-    if unsigned.version != 2 || unsigned.lock_time != elements::LockTime::ZERO {
-        return Err(WalletError::InvalidPset(
-            "transaction version or locktime is unsupported".into(),
-        ));
-    }
-    for (map, input) in pset.inputs().iter().zip(&unsigned.input) {
-        if map.sequence != Some(Sequence::MAX)
-            || map.non_witness_utxo.is_some()
-            || !map.partial_sigs.is_empty()
-            || map.sighash_type.is_some()
-            || map.redeem_script.is_some()
-            || map.witness_script.is_some()
-            || map.final_script_sig.is_some()
-            || map.final_script_witness.is_some()
-            || map.required_time_locktime.is_some()
-            || map.required_height_locktime.is_some()
-            || map.tap_key_sig.is_some()
-            || !map.tap_script_sigs.is_empty()
-            || !map.tap_scripts.is_empty()
-            || !map.tap_key_origins.is_empty()
-            || map.tap_internal_key.is_some()
-            || map.tap_merkle_root.is_some()
-            || map.issuance_value_amount.is_some()
-            || map.issuance_value_comm.is_some()
-            || map.issuance_value_rangeproof.is_some()
-            || map.issuance_keys_rangeproof.is_some()
-            || map.pegin_tx.is_some()
-            || map.pegin_txout_proof.is_some()
-            || map.pegin_genesis_hash.is_some()
-            || map.pegin_claim_script.is_some()
-            || map.pegin_value.is_some()
-            || map.pegin_witness.is_some()
-            || map.issuance_inflation_keys.is_some()
-            || map.issuance_inflation_keys_comm.is_some()
-            || map.issuance_blinding_nonce.is_some()
-            || map.issuance_asset_entropy.is_some()
-            || map.in_utxo_rangeproof.is_some()
-            || map.in_issuance_blind_value_proof.is_some()
-            || map.in_issuance_blind_inflation_keys_proof.is_some()
-            || map.blind_value_proof.is_some()
-            || map.blind_asset_proof.is_some()
-            || map.blinded_issuance.is_some()
-            || !map.proprietary.is_empty()
-            || !map.unknown.is_empty()
-            || input.is_pegin
-            || !input.asset_issuance.is_null()
-            || !input.script_sig.is_empty()
-            || input.witness != TxInWitness::default()
-        {
-            return Err(WalletError::InvalidPset(
-                "input contains unsupported signing, issuance, peg-in, proof, or script fields"
-                    .into(),
-            ));
-        }
-    }
-    for output in pset.outputs() {
-        if output.redeem_script.is_some()
-            || output.witness_script.is_some()
-            || output.tap_internal_key.is_some()
-            || output.tap_tree.is_some()
-            || !output.tap_key_origins.is_empty()
-            || output.value_rangeproof.is_some()
-            || output.asset_surjection_proof.is_some()
-            || output.blind_value_proof.is_some()
-            || output.blind_asset_proof.is_some()
-            || !output.proprietary.is_empty()
-            || !output.unknown.is_empty()
-        {
-            return Err(WalletError::InvalidPset(
-                "output contains unsupported scripts, proofs, or metadata".into(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn native_address(
-    script: &Script,
-    address_params: &'static AddressParams,
-) -> Result<String, WalletError> {
-    Address::from_script(script, None, address_params)
-        .filter(|address| !address.is_blinded() && script.is_v0_p2wpkh())
-        .map(|address| address.to_string())
-        .ok_or(WalletError::InvalidPset(
-            "only unconfidential P2WPKH outputs are supported".into(),
-        ))
-}
-
-#[cfg(feature = "wasm")]
-mod wasm {
-    use super::*;
-    use wasm_bindgen::prelude::*;
-
-    /// Thin JSON boundary for MV3 offscreen-document integration. Amounts in
-    /// production callers should stay below JavaScript's safe integer ceiling;
-    /// the native Rust API remains the authoritative typed boundary.
-    #[wasm_bindgen]
-    pub struct WasmWalletCore {
-        inner: WalletCore,
-    }
-
-    #[wasm_bindgen]
-    impl WasmWalletCore {
-        #[wasm_bindgen(constructor)]
-        pub fn new(mnemonic: &str) -> Result<WasmWalletCore, JsValue> {
-            WalletCore::new(mnemonic)
-                .map(|inner| Self { inner })
-                .map_err(js_error)
-        }
-
-        /// Test-only constructor for the isolated Elements+ functional chain.
-        /// It is absent from the reviewed production WASM artifact.
-        #[cfg(feature = "regtest")]
-        #[wasm_bindgen(js_name = forRegtest)]
-        pub fn for_regtest(
-            mnemonic: &str,
-            genesis_hash: &str,
-            policy_asset: &str,
-            display_name: &str,
-        ) -> Result<WasmWalletCore, JsValue> {
-            let genesis_hash = BlockHash::from_str(genesis_hash)
-                .map_err(|_| JsValue::from_str("invalid regtest genesis hash"))?;
-            let policy_asset = AssetId::from_str(policy_asset)
-                .map_err(|_| JsValue::from_str("invalid regtest policy asset"))?;
-            let parent_genesis = Network::default_regtest().parent_genesis_hash();
-            let network = Network::CustomElements(
-                ElementsParamsBuilder::new()
-                    .with_genesis_hash(genesis_hash)
-                    .with_policy_asset(policy_asset)
-                    .with_parent_genesis_hash(parent_genesis)
-                    .build()
-                    .map_err(|_| JsValue::from_str("invalid regtest network parameters"))?,
-            );
-            WalletCore::new_for_network(
-                mnemonic,
-                network,
-                display_name,
-                &AddressParams::ELEMENTS,
-                &AddressParams::ELEMENTS,
-            )
-            .map(|inner| Self { inner })
-            .map_err(js_error)
-        }
-
-        pub fn derive_address_json(&self, branch: &str, index: u32) -> Result<String, JsValue> {
-            let branch = match branch {
-                "external" => Branch::External,
-                "change" => Branch::Change,
-                _ => return Err(JsValue::from_str("invalid branch")),
-            };
-            let value = self.inner.derive_address(branch, index).map_err(js_error)?;
-            serde_json::to_string(&value).map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-
-        pub fn prepare_send_json(&self, request_json: &str) -> Result<String, JsValue> {
-            let request = serde_json::from_str(request_json)
-                .map_err(|e| JsValue::from_str(&format!("invalid request JSON: {e}")))?;
-            let value = self.inner.prepare_send(request).map_err(js_error)?;
-            serde_json::to_string(&value).map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-
-        pub fn sign_prepared_json(
-            &self,
-            prepared_json: &str,
-            approved_review_hash: &str,
-        ) -> Result<String, JsValue> {
-            let prepared = serde_json::from_str(prepared_json)
-                .map_err(|e| JsValue::from_str(&format!("invalid prepared JSON: {e}")))?;
-            let value = self
-                .inner
-                .sign_prepared(&prepared, approved_review_hash)
-                .map_err(js_error)?;
-            serde_json::to_string(&value).map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-
-        pub fn verify_raw_transaction_json(&self, request_json: &str) -> Result<String, JsValue> {
-            let request = serde_json::from_str(request_json)
-                .map_err(|e| JsValue::from_str(&format!("invalid verification JSON: {e}")))?;
-            let value = verify_raw_transaction(&request).map_err(js_error)?;
-            serde_json::to_string(&value).map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-    }
-
-    #[wasm_bindgen]
-    pub fn validate_mnemonic(mnemonic: &str) -> bool {
-        WalletCore::validate_mnemonic(mnemonic).is_ok()
-    }
-
-    #[wasm_bindgen]
-    pub fn generate_mnemonic() -> Result<String, JsValue> {
-        WalletCore::generate_mnemonic().map_err(js_error)
-    }
-
-    /// Verify a receipt against an operator configuration that was provisioned
-    /// locally with the extension. The signer never supplies this trust root.
-    #[wasm_bindgen]
-    pub fn verify_preconfirmation_receipt(
-        config_json: &str,
-        receipt_json: &str,
-    ) -> Result<bool, JsValue> {
-        let config: elementsplus_preconf::operator::Config = serde_json::from_str(config_json)
-            .map_err(|e| JsValue::from_str(&format!("invalid operator config: {e}")))?;
-        let receipt: elementsplus_preconf::operator::Receipt =
-            serde_json::from_str(receipt_json)
-                .map_err(|e| JsValue::from_str(&format!("invalid receipt: {e}")))?;
-        config
-            .compile()
-            .and_then(|bond| bond.verify(&receipt))
-            .map_err(|e| JsValue::from_str(&e))?;
-        Ok(true)
-    }
-
-    fn js_error(error: WalletError) -> JsValue {
-        JsValue::from_str(&error.to_string())
-    }
+/// `txid:vout`. `OutPoint`'s `Display` adds an `[elements]` prefix.
+pub(crate) fn outpoint_label(outpoint: &OutPoint) -> String {
+    format!("{}:{}", outpoint.txid, outpoint.vout)
 }
