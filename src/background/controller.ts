@@ -47,6 +47,8 @@ export interface WalletOpener {
 export interface TokenLookup {
   lookup(assetIds: readonly string[]): Promise<Record<string, TokenInfo>>;
   cached(assetIds: readonly string[]): Promise<Record<string, TokenInfo>>;
+  /** Remember the metadata of an asset this wallet issued (ids derived by the core from the contract). */
+  rememberIssued?(issued: { readonly assetId: string; readonly tokenId: string | null; readonly contract: Record<string, unknown> }): Promise<void>;
   clear(): Promise<void>;
 }
 
@@ -526,6 +528,7 @@ export class WalletController {
       const vin = this.#deps.wallets.findIssuanceVin === undefined
         ? 0
         : await this.#deps.wallets.findIssuanceVin(signed.rawTxHex!, txid, contract, issuance.assetId, plan.prepared.review.inputsSigned.length);
+      await this.#deps.tokens?.rememberIssued?.({ assetId: issuance.assetId, tokenId: issuance.tokenId, contract }).catch(() => undefined);
       return {
         txid,
         assetId: issuance.assetId,

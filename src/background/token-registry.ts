@@ -12,6 +12,13 @@ import { isPlainRecord } from "../shared/validation.js";
 export const TOKEN_CACHE_KEY = "elementsplus.tokens.v1";
 const HEX_32 = /^[0-9a-f]{64}$/u;
 const RETRY_UNVERIFIED_MS = 10 * 60 * 1_000;
+/**
+ * A registry miss (404) or an unreachable registry/explorer is usually
+ * temporary — e.g. a token the user just launched is registered a moment after
+ * its issuance is broadcast — so it is retried much sooner than an entry that
+ * failed verification.
+ */
+const RETRY_MISSING_MS = 20 * 1_000;
 const MAX_CACHE_ENTRIES = 2_000;
 // Control, bidi-override and zero-width characters enable visual spoofing.
 const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/u;
@@ -29,6 +36,8 @@ export interface TokenInfo {
 
 interface CachedEntry {
   readonly status: "verified" | "unverified";
+  /** Unverified because the entry could not be fetched (not because it failed verification). */
+  readonly missing?: boolean;
   readonly name?: string;
   readonly ticker?: string;
   readonly precision?: number;
@@ -115,7 +124,8 @@ export class TokenRegistry {
         continue;
       }
       let entry = entries[assetId];
-      const stale = entry === undefined || (entry.status === "unverified" && this.#now() - entry.checkedAt > RETRY_UNVERIFIED_MS);
+      const stale = entry === undefined
+        || (entry.status === "unverified" && this.#now() - entry.checkedAt > (entry.missing === true ? RETRY_MISSING_MS : RETRY_UNVERIFIED_MS));
       if (stale && endpoints.registryUrl !== "") {
         entry = await this.#resolve(assetId, endpoints);
         entries[assetId] = entry;
@@ -125,6 +135,27 @@ export class TokenRegistry {
     }
     if (changed) await this.#writeCache(endpoints, entries);
     return result;
+  }
+
+  /**
+   * Record an asset this wallet just issued. The core derived `assetId` (and
+   * `tokenId`) from exactly this contract while building the transaction the
+   * user approved, which is the same proof `verify_asset_issuance` gives for a
+   * registry entry. Without this the new token stays "Unknown asset" until the
+   * registry lists it and the next lookup runs.
+   */
+  async rememberIssued(issued: { readonly assetId: string; readonly tokenId: string | null; readonly contract: Record<string, unknown> }): Promise<void> {
+    if (!HEX_32.test(issued.assetId) || (issued.tokenId !== null && !HEX_32.test(issued.tokenId))) return;
+    const metadata = contractMetadata(issued.contract, this.#deps.nativeAsset.ticker);
+    if (metadata === null) return;
+    const endpoints = await this.#deps.endpoints();
+    const cache = await this.#readCache(endpoints);
+    const checkedAt = this.#now();
+    const entries: Record<string, CachedEntry> = { ...cache.entries, [issued.assetId]: { status: "verified", ...metadata, tokenFor: null, checkedAt } };
+    if (issued.tokenId !== null) {
+      entries[issued.tokenId] = { status: "verified", name: `${metadata.name} reissuance token`, ticker: `${metadata.ticker}-RT`, precision: 0, tokenFor: issued.assetId, checkedAt };
+    }
+    await this.#writeCache(endpoints, entries);
   }
 
   async clear(): Promise<void> {
@@ -159,8 +190,15 @@ export class TokenRegistry {
 
   async #verify(assetId: string, endpoints: { readonly registryUrl: string; readonly explorerUrl: string }): Promise<CachedEntry> {
     const unverified: CachedEntry = Object.freeze({ status: "unverified", checkedAt: this.#now() });
+    const missing: CachedEntry = Object.freeze({ status: "unverified", missing: true, checkedAt: this.#now() });
+    let entry: unknown;
     try {
-      const entry = await fetchJson(`${endpoints.registryUrl}/${assetId}`, { fetchImpl: this.#deps.fetchImpl, maxBytes: 64 * 1024 });
+      entry = await fetchJson(`${endpoints.registryUrl}/${assetId}`, { fetchImpl: this.#deps.fetchImpl, maxBytes: 64 * 1024 });
+    } catch {
+      // Not registered (yet), registry unreachable or a bad response: retry soon.
+      return missing;
+    }
+    try {
       if (!isPlainRecord(entry)) return unverified;
       const txid = entry["issuance_txid"];
       const vin = entry["issuance_vin"];
@@ -170,11 +208,17 @@ export class TokenRegistry {
       }
       const metadata = contractMetadata(contract, this.#deps.nativeAsset.ticker);
       if (metadata === null) return unverified;
-      const rawTxHex = (await fetchText(`${esploraApiBase(endpoints.explorerUrl)}/tx/${txid}/hex`, {
-        fetchImpl: this.#deps.fetchImpl,
-        accept: "text/plain",
-        maxBytes: 8 * 1024 * 1024 + 2,
-      })).trim();
+      let rawTxHex: string;
+      try {
+        rawTxHex = (await fetchText(`${esploraApiBase(endpoints.explorerUrl)}/tx/${txid}/hex`, {
+          fetchImpl: this.#deps.fetchImpl,
+          accept: "text/plain",
+          maxBytes: 8 * 1024 * 1024 + 2,
+        })).trim();
+      } catch {
+        // The explorer may not have the issuance yet.
+        return missing;
+      }
       if (!/^(?:[0-9a-f]{2})+$/u.test(rawTxHex)) return unverified;
       const verified = await this.#deps.verifyIssuance({ rawTxHex, expectedTxid: txid, vin, contract });
       if (verified.assetId === assetId) {
@@ -226,7 +270,7 @@ export class TokenRegistry {
           checkedAt: raw["checkedAt"],
         };
       } else {
-        entries[assetId] = { status: "unverified", checkedAt: raw["checkedAt"] };
+        entries[assetId] = { status: "unverified", ...(raw["missing"] === true ? { missing: true } : {}), checkedAt: raw["checkedAt"] };
       }
     }
     return { ...endpoints, entries };
