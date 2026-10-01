@@ -677,15 +677,21 @@ impl Wallet {
                         out["token_id"] = issuance.token_id.clone().into();
                         out["vin"] = 0.into();
                         if let Some(contract) = issuance_contract {
-                            let verified = state::verify_issuance(raw, &txid, 0, contract)?;
-                            if verified[0].asset_id != issuance.asset_id {
-                                bail!("issued asset id does not verify against the contract");
-                            }
-                            {
-                                let mut state = self.state.borrow_mut();
-                                for asset in verified {
-                                    state.assets.insert(asset.asset_id.clone(), asset);
+                            // The transaction is already broadcast: report a
+                            // verification failure instead of aborting.
+                            match state::verify_issuance(raw, &txid, 0, contract) {
+                                Ok(verified) if verified[0].asset_id == issuance.asset_id => {
+                                    let mut state = self.state.borrow_mut();
+                                    for asset in verified {
+                                        state.assets.insert(asset.asset_id.clone(), asset);
+                                    }
                                 }
+                                Ok(_) => {
+                                    out["verification_error"] =
+                                        "issued asset id does not verify against the contract"
+                                            .into()
+                                }
+                                Err(error) => out["verification_error"] = error.to_string().into(),
                             }
                             out["contract"] = serde_json::to_value(contract)?;
                             if *register {
