@@ -12,8 +12,11 @@ forbids remote fonts; fall back to system-ui).
 
 ## 0. Ground rules
 
-- Explicit (non-confidential) outputs only. ECX Alpha is pinned by genesis and
-  policy asset; nothing here relaxes the existing identity checks.
+- Explicit outputs by default. ECX Alpha is pinned by genesis and policy
+  asset; nothing here relaxes the existing identity checks. Confidential
+  funds received from other wallets are seen and spendable (§1.4);
+  confidential receive addresses are a per-profile opt-in, and swap offers
+  and takes stay explicit-only.
 - All amounts cross JSON boundaries as **decimal strings of atomic units**
   (`"2500000"`), never floats. Display precision comes from asset metadata
   (`precision`, default 0 for unknown assets, 8 for ECX).
@@ -83,7 +86,9 @@ export function decode_offer_json(offer: string, prevout_raw_tx_hex: string): st
 export class WasmWalletCore {
   constructor(mnemonic: string);
   static forRegtest?(mnemonic: string, genesisHash: string, policyAsset: string, displayName: string): WasmWalletCore;
-  derive_address_json(branch: string, index: number): string;
+  derive_address_json(branch: string, index: number, confidential?: boolean | null): string;
+  set_confidential_receive(enabled: boolean): void;
+  confidential_receive(): boolean;
   verify_raw_transaction_json(req: string): string;
   prepare_transfer_json(req: string): string;   // PreparedTx
   prepare_issuance_json(req: string): string;
@@ -98,7 +103,27 @@ export class WasmWalletCore {
 ```
 
 `utxos` entries keep the existing `VerifiedUtxo` shape (`txid, vout, value,
-asset_id, script_pubkey_hex, branch, index`) but any asset is accepted.
+asset_id, script_pubkey_hex, branch, index`) but any asset is accepted, plus
+an optional `blinding` object for confidential UTXOs (§1.4).
+
+### 1.4 Confidential transactions
+
+- `derive_address_json(branch, index, confidential?)`; `set_confidential_receive(bool)`
+  (default off). Confidential derivations add `confidential_address`,
+  `confidential_lwk_alias`, `blinding_pubkey_hex` (SLIP-77 from the seed).
+- `verify_raw_transaction_json` (instance method) unblinds confidential wallet
+  outputs with the wallet's key and adds `blinding: {asset_commitment_hex,
+  value_commitment_hex, asset_blinder_hex, value_blinder_hex}`; outputs that
+  do not unblind fail verification. Pass `blinding` back unchanged in a
+  `VerifiedUtxo` to spend.
+- Transfers, issuances, offer splits and cancels may spend confidential
+  UTXOs. Recipient output follows the address type; change is confidential
+  iff any input is; the fee is explicit. Outputs are blinded before the
+  review, which is recomputed from the PSET (explicit value/asset proofs on
+  every confidential input and output, full proof verification) and marks
+  `confidential: true` on the review and on blinded external outputs.
+- Swap offers refuse confidential UTXOs; takes never select them; offer
+  splits always create an explicit offerable output.
 
 ## 2. Swap offer format (LiquiDEX-style, explicit)
 
