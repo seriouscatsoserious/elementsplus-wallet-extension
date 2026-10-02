@@ -28,10 +28,30 @@ export class WasmWalletCore {
     policyAsset: string,
     displayName: string,
   ): WasmWalletCore;
-  derive_address_json(branch: string, index: number): string;
-  /** camelCase request/response, unchanged from v1. */
+  /**
+   * `confidential` overrides the wallet default (omitted/undefined keeps it).
+   * Confidential results add `confidential_address`, `confidential_lwk_alias`
+   * and `blinding_pubkey_hex` (SLIP-77); `native_address` stays unconfidential.
+   */
+  derive_address_json(branch: string, index: number, confidential?: boolean | null): string;
+  /** Make default receive addresses confidential. Off by default. */
+  set_confidential_receive(enabled: boolean): void;
+  confidential_receive(): boolean;
+  /**
+   * camelCase request/response, unchanged from v1 for explicit outputs.
+   * Confidential wallet outputs that unblind with this wallet's SLIP-77 key
+   * add `blinding: {asset_commitment_hex, value_commitment_hex,
+   * asset_blinder_hex, value_blinder_hex}`; any other confidential output
+   * fails the whole verification.
+   */
   verify_raw_transaction_json(requestJson: string): string;
-  /** Each prepare_* returns PreparedTx JSON `{pset_base64, review, review_hash}`. */
+  /**
+   * Each prepare_* returns PreparedTx JSON `{pset_base64, review, review_hash}`.
+   * UTXOs may carry `blinding` (as returned above) to spend confidential
+   * funds; `review.confidential` and `external_outputs[].confidential` are
+   * present (true) only for confidential transactions/outputs. Swap offers
+   * and takes are explicit-only.
+   */
   prepare_transfer_json(requestJson: string): string;
   prepare_issuance_json(requestJson: string): string;
   prepare_offer_split_json(requestJson: string): string;

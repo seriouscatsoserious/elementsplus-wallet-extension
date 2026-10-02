@@ -3,6 +3,7 @@
  * Builds core requests from freshly scanned, core-verified UTXOs.
  */
 import {
+  coreUtxoBlinding,
   WalletCore,
   WalletCoreError,
   WalletCoreSession,
@@ -44,6 +45,22 @@ export interface WalletAddress {
   readonly scriptPubKeyHex: string;
 }
 
+/** A wallet-owned output whose explorer data is confidential. */
+export interface ConfidentialOutputRef {
+  readonly txid: string;
+  readonly vout: number;
+  readonly scriptPubKeyHex: string;
+}
+
+/** Locally unblinded amount of a wallet output, keyed by `txid:vout`. */
+export interface UnblindedOutput {
+  readonly assetId: string;
+  readonly valueAtomic: string;
+}
+
+/** Upper bound on transactions fetched to unblind activity in one call. */
+const MAX_UNBLIND_TRANSACTIONS = 200;
+
 /** What the controller needs from an unlocked wallet. Faked in tests. */
 export interface WalletSession {
   sync(signal?: AbortSignal): Promise<WalletSnapshot>;
@@ -58,6 +75,12 @@ export interface WalletSession {
   ): Promise<{ readonly prepared: PreparedTx; readonly offeredOutpoint: string }>;
   sign(prepared: PreparedTx, approvedReviewHash: string): SignResult;
   broadcast(rawTxHex: string, txid: string): Promise<string>;
+  /**
+   * Unblind confidential wallet outputs for display (activity). Fetches each
+   * raw transaction and unblinds it with the core; outputs that do not
+   * unblind with this wallet's key are simply absent from the result.
+   */
+  unblindOutputs?(refs: readonly ConfidentialOutputRef[]): Promise<ReadonlyMap<string, UnblindedOutput>>;
   destroy(): void;
 }
 
@@ -77,10 +100,20 @@ export interface SessionOptions {
   readonly fetchImpl: FetchImplementation;
   readonly scannerFactory?: ScannerFactory;
   readonly now?: () => Date;
+  /**
+   * Network-profile opt-in: hand out confidential (SLIP-77) receive
+   * addresses. Off by default. Confidential funds that unblind with this
+   * wallet's key are always counted and spendable regardless.
+   */
+  readonly confidentialReceive?: boolean;
 }
 
 function fail(message: string): never {
   throw new WalletCoreError(message);
+}
+
+function scanConfidentialFor(options: SessionOptions): false | undefined {
+  return options.confidentialReceive === true ? false : undefined;
 }
 
 export class ElementsPlusWalletSession implements WalletSession {
@@ -96,9 +129,12 @@ export class ElementsPlusWalletSession implements WalletSession {
     this.#core = core;
     this.#module = module;
     this.#options = options;
+    // Scanning always uses the unconfidential address (it identifies the
+    // script); only the displayed receive address is confidential.
+    const scanConfidential = scanConfidentialFor(options);
     const derive: ExplorerHdAddressDeriver = ({ chain, index }) => {
       this.#assertOpen();
-      const derived = this.#core.deriveAddress(chain, index);
+      const derived = this.#core.deriveAddress(chain, index, scanConfidential);
       return Object.freeze({ chain, index, address: derived.address, scriptPubKeyHex: derived.scriptPubKeyHex });
     };
     const verify: ExplorerHdRawTransactionVerifier = (request) => {
@@ -111,7 +147,7 @@ export class ElementsPlusWalletSession implements WalletSession {
     };
     const factory = options.scannerFactory ?? ((d, v, o) => new ExplorerHdScanner(d, v, o));
     this.#scanner = factory(derive, verify, Object.freeze({ explorerUrl: options.explorerUrl, fetchImpl: options.fetchImpl }));
-    this.#primary = this.#core.deriveAddress("external", 0).address;
+    this.#primary = this.#core.deriveAddress("external", 0, scanConfidential).address;
   }
 
   primaryAddress(): string {
@@ -184,7 +220,10 @@ export class ElementsPlusWalletSession implements WalletSession {
           receive_index: receiveIndex,
         }) };
       case "swap_offer": {
-        const exactUtxo = utxos.find((utxo) => utxo.asset_id === operation.giveAsset && utxo.value === operation.giveAmount);
+        // Offers are explicit-only: a confidential coin of the exact amount
+        // still goes through an offer split, which creates an explicit output.
+        const exactUtxo = utxos.find((utxo) =>
+          utxo.blinding === undefined && utxo.asset_id === operation.giveAsset && utxo.value === operation.giveAmount);
         if (exactUtxo !== undefined) {
           return {
             prepared: this.#prepare({
@@ -260,7 +299,7 @@ export class ElementsPlusWalletSession implements WalletSession {
   ): Promise<{ readonly prepared: PreparedTx; readonly offeredOutpoint: string }> {
     this.#assertOpen();
     if (split.rawTxHex === null) fail("offer preparation did not produce a transaction");
-    const destination = this.#core.deriveAddress("external", receiveIndex);
+    const destination = this.#core.deriveAddress("external", receiveIndex, scanConfidentialFor(this.#options));
     // Find the exact-amount output locally from the signed bytes (no explorer trust).
     let found: { vout: number; value: string; assetId: string } | undefined;
     for (let vout = 0; vout < 64 && found === undefined; vout += 1) {
@@ -271,7 +310,10 @@ export class ElementsPlusWalletSession implements WalletSession {
           expectedWalletOutputs: [{ vout, scriptPubKeyHex: destination.scriptPubKeyHex }],
         });
         const output = verified.outputs.find((entry) => entry.vout === vout);
-        if (output !== undefined && output.assetId === operation.giveAsset && output.valueAtomic === operation.giveAmount) {
+        if (
+          output !== undefined && output.blinding === undefined
+          && output.assetId === operation.giveAsset && output.valueAtomic === operation.giveAmount
+        ) {
           found = { vout, value: output.valueAtomic, assetId: output.assetId };
         }
       } catch {
@@ -327,6 +369,44 @@ export class ElementsPlusWalletSession implements WalletSession {
     return body;
   }
 
+  async unblindOutputs(refs: readonly ConfidentialOutputRef[]): Promise<ReadonlyMap<string, UnblindedOutput>> {
+    this.#assertOpen();
+    const byTxid = new Map<string, Map<number, string>>();
+    for (const ref of refs) {
+      if (!/^[0-9a-f]{64}$/u.test(ref.txid) || !Number.isSafeInteger(ref.vout) || ref.vout < 0) continue;
+      const outputs = byTxid.get(ref.txid) ?? new Map<number, string>();
+      outputs.set(ref.vout, ref.scriptPubKeyHex);
+      byTxid.set(ref.txid, outputs);
+    }
+    const result = new Map<string, UnblindedOutput>();
+    for (const [txid, outputs] of [...byTxid.entries()].slice(0, MAX_UNBLIND_TRANSACTIONS)) {
+      let raw: string;
+      try {
+        raw = await this.#rawTransaction(txid);
+      } catch {
+        continue;
+      }
+      this.#assertOpen();
+      // One output at a time: a foreign confidential output must not hide ours.
+      for (const [vout, scriptPubKeyHex] of outputs) {
+        try {
+          const verified = this.#core.verifyRawTransaction({
+            expectedTxid: txid,
+            rawTransactionHex: raw,
+            expectedWalletOutputs: [{ vout, scriptPubKeyHex }],
+          });
+          const output = verified.outputs.find((entry) => entry.vout === vout);
+          if (output !== undefined) {
+            result.set(`${txid}:${vout}`, Object.freeze({ assetId: output.assetId, valueAtomic: output.valueAtomic }));
+          }
+        } catch {
+          // Not ours to unblind (or not a wallet output); leave it unknown.
+        }
+      }
+    }
+    return result;
+  }
+
   destroy(): void {
     if (this.#destroyed) return;
     this.#destroyed = true;
@@ -354,15 +434,19 @@ export class ElementsPlusWalletSession implements WalletSession {
   }
 
   #utxos(scan: ExplorerHdSnapshotInput): CoreUtxo[] {
-    return scan.utxos.map((utxo) => Object.freeze({
-      txid: utxo.txid,
-      vout: utxo.vout,
-      value: utxo.valueAtomic,
-      asset_id: utxo.assetId,
-      script_pubkey_hex: utxo.scriptPubKeyHex,
-      branch: utxo.chain,
-      index: utxo.index,
-    }));
+    return scan.utxos.map((utxo) => {
+      const base: CoreUtxo = {
+        txid: utxo.txid,
+        vout: utxo.vout,
+        value: utxo.valueAtomic,
+        asset_id: utxo.assetId,
+        script_pubkey_hex: utxo.scriptPubKeyHex,
+        branch: utxo.chain,
+        index: utxo.index,
+      };
+      // Explicit UTXOs keep their exact v2 request shape.
+      return Object.freeze(utxo.blinding === undefined ? base : { ...base, blinding: coreUtxoBlinding(utxo.blinding) });
+    });
   }
 
   #nextIndex(scan: ExplorerHdSnapshotInput, chain: "external" | "change"): number {
@@ -373,6 +457,10 @@ export class ElementsPlusWalletSession implements WalletSession {
 
   #receiveAddress(scan: ExplorerHdSnapshotInput): string {
     const index = this.#nextIndex(scan, "external");
+    if (this.#options.confidentialReceive === true) {
+      const derived = this.#core.deriveAddress("external", index, true);
+      return derived.confidentialAddress ?? fail("core did not derive a confidential receive address");
+    }
     return scan.addresses.find((entry) => entry.chain === "external" && entry.index === index)?.address
       ?? this.#core.deriveAddress("external", index).address;
   }
@@ -427,7 +515,11 @@ export class ElementsPlusWalletFactory {
   }
 
   async open(mnemonic: string, explorerUrl: string): Promise<WalletSession> {
-    const session = await this.core.open(mnemonic, this.options.identity);
+    const session = await this.core.open(
+      mnemonic,
+      this.options.identity,
+      this.options.confidentialReceive === true ? { confidentialReceive: true } : {},
+    );
     try {
       return new ElementsPlusWalletSession(session, this.core, { ...this.options, explorerUrl });
     } catch (error) {

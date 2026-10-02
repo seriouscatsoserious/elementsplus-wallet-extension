@@ -430,12 +430,14 @@ mod tests {
                     address: (*address).into(),
                     asset_id: (*asset).into(),
                     amount: *amount,
+                    confidential: false,
                 })
                 .collect(),
             inputs_signed: vec![],
             foreign_inputs: vec![],
             issuance: None,
             sighash: SIGHASH_ALL.into(),
+            confidential: false,
         }
     }
 

@@ -150,7 +150,24 @@ impl WalletCore {
         kind: TxKind,
     ) -> Result<(), WalletError> {
         let fail = |reason: String| WalletError::FinalTransaction(reason);
-        validate_explicit_transaction(signed).map_err(|e| fail(e.to_string()))?;
+        if analysis_confidential(signed) {
+            let prevouts = pset
+                .inputs()
+                .iter()
+                .map(|input| input.witness_utxo.clone())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| fail("an input lacks its prevout".into()))?;
+            signed
+                .verify_tx_amt_proofs(&self.secp, &prevouts)
+                .map_err(|e| fail(format!("confidential proofs do not verify: {e}")))?;
+            if signed.output.iter().any(|o| {
+                o.script_pubkey.is_empty() && (!o.asset.is_explicit() || !o.value.is_explicit())
+            }) {
+                return Err(fail("the fee output must be explicit".into()));
+            }
+        } else {
+            validate_explicit_transaction(signed).map_err(|e| fail(e.to_string()))?;
+        }
         if unsigned.version != signed.version
             || unsigned.lock_time != signed.lock_time
             || unsigned.output != signed.output
@@ -197,4 +214,11 @@ impl WalletCore {
         }
         Ok(())
     }
+}
+
+/// Whether a final transaction has any non-explicit output.
+fn analysis_confidential(tx: &Transaction) -> bool {
+    tx.output.iter().any(|output| {
+        !output.asset.is_explicit() || !output.value.is_explicit() || !output.nonce.is_null()
+    })
 }

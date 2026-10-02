@@ -1106,7 +1106,8 @@ impl Wallet {
         let mut steps = Vec::new();
         let exact = spendable
             .iter()
-            .filter(|u| u.asset_id == give && u.value == give_amount)
+            // Offers are explicit-only: a confidential coin goes through a split.
+            .filter(|u| u.blinding.is_none() && u.asset_id == give && u.value == give_amount)
             .min_by_key(|u| {
                 // Prefer confirmed outputs.
                 let confirmed = snapshot
@@ -1148,6 +1149,7 @@ impl Wallet {
                     script_pubkey_hex: derived.script_pubkey_hex,
                     branch: Branch::External,
                     index: receive,
+                    blinding: None,
                 };
                 receive += 1;
                 utxo

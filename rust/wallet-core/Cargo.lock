@@ -276,6 +276,7 @@ dependencies = [
  "hex",
  "lwk_common",
  "lwk_signer",
+ "rand",
  "serde",
  "serde_json",
  "thiserror",

@@ -42,14 +42,27 @@ export interface ExplorerHdRawTransactionVerificationRequest {
 }
 
 /**
+ * Commitments and blinders of a confidential wallet output, produced by the
+ * local parser after it unblinded the output with the wallet's key.
+ */
+export interface ExplorerHdOutputBlinding {
+  readonly assetCommitmentHex: string;
+  readonly valueCommitmentHex: string;
+  readonly assetBlinderHex: string;
+  readonly valueBlinderHex: string;
+}
+
+/**
  * Authenticated output data produced by the caller's local transaction parser.
  * The callback must compute `txid` from the supplied bytes, not echo the request.
+ * `blinding` is present only for a confidential output the parser unblinded.
  */
 export interface ExplorerHdVerifiedOutput {
   readonly vout: number;
   readonly scriptPubKeyHex: string;
   readonly assetId: string;
   readonly valueAtomic: string;
+  readonly blinding?: ExplorerHdOutputBlinding;
 }
 
 export interface ExplorerHdVerifiedTransaction {
@@ -98,6 +111,8 @@ export interface ExplorerHdVerifiedUtxo extends ExplorerHdExpectedOutput {
   readonly assetId: string;
   readonly valueAtomic: string;
   readonly status: ExplorerHdConfirmationStatus;
+  /** Present only for a confidential UTXO (needed to spend it). */
+  readonly blinding?: ExplorerHdOutputBlinding;
 }
 
 export interface ExplorerHdFundingTransaction {
@@ -159,6 +174,7 @@ export class ExplorerHdScanError extends Error {
 }
 
 const HEX_32_BYTES = /^[0-9a-f]{64}$/u;
+const COMMITMENT_33_BYTES = /^0[89ab][0-9a-f]{64}$/u;
 const EVEN_LOWER_HEX = /^(?:[0-9a-f]{2})+$/u;
 const CANONICAL_ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/u;
 const MAX_U64 = 18_446_744_073_709_551_615n;
@@ -178,6 +194,8 @@ interface RawExplorerUtxo {
   readonly status: ExplorerHdConfirmationStatus;
   readonly explorerAssetId?: string;
   readonly explorerValueAtomic?: string;
+  readonly explorerAssetCommitment?: string;
+  readonly explorerValueCommitment?: string;
 }
 
 interface AddressScanResult {
@@ -250,6 +268,13 @@ function atomicAmount(value: unknown, label: string): string {
     throw new ExplorerHdScanError(`${label} exceeds uint64`);
   }
   return amount;
+}
+
+function commitmentHex(value: unknown, label: string): string {
+  if (typeof value !== "string" || !COMMITMENT_33_BYTES.test(value)) {
+    throw new ExplorerHdScanError(`${label} is not a 33-byte commitment`);
+  }
+  return value;
 }
 
 function scriptHex(value: unknown, label: string): string {
@@ -371,6 +396,13 @@ function parseUtxos(value: unknown, label: string): readonly RawExplorerUtxo[] {
     if (hasValue !== hasAsset) {
       throw new ExplorerHdScanError(`${label}[${index}] has incomplete explicit output data`);
     }
+    // Confidential outputs carry commitments instead. They are only hints:
+    // the wallet core unblinds the raw transaction and these must agree.
+    const hasValueCommitment = typeof data["valuecommitment"] === "string";
+    const hasAssetCommitment = typeof data["assetcommitment"] === "string";
+    if (hasValueCommitment !== hasAssetCommitment || (hasValueCommitment && hasValue)) {
+      throw new ExplorerHdScanError(`${label}[${index}] mixes explicit and confidential output data`);
+    }
     return Object.freeze({
       txid,
       vout,
@@ -381,8 +413,28 @@ function parseUtxos(value: unknown, label: string): readonly RawExplorerUtxo[] {
           explorerValueAtomic: atomicAmount(data["value"], `${label}[${index}].value`),
         }
         : {}),
+      ...(hasValueCommitment
+        ? {
+          explorerAssetCommitment: commitmentHex(data["assetcommitment"], `${label}[${index}].assetcommitment`),
+          explorerValueCommitment: commitmentHex(data["valuecommitment"], `${label}[${index}].valuecommitment`),
+        }
+        : {}),
     });
   }));
+}
+
+function parseBlinding(value: unknown, label: string): ExplorerHdOutputBlinding {
+  const data = asRecord(value, label);
+  const keys = Object.keys(data).sort().join(",");
+  if (keys !== "assetBlinderHex,assetCommitmentHex,valueBlinderHex,valueCommitmentHex") {
+    throw new ExplorerHdScanError(`${label} has missing or unexpected fields`);
+  }
+  return Object.freeze({
+    assetCommitmentHex: commitmentHex(data["assetCommitmentHex"], `${label}.assetCommitmentHex`),
+    valueCommitmentHex: commitmentHex(data["valueCommitmentHex"], `${label}.valueCommitmentHex`),
+    assetBlinderHex: lowercaseHash(data["assetBlinderHex"], `${label}.assetBlinderHex`),
+    valueBlinderHex: lowercaseHash(data["valueBlinderHex"], `${label}.valueBlinderHex`),
+  });
 }
 
 function parseVerifiedTransaction(
@@ -410,7 +462,7 @@ function parseVerifiedTransaction(
       throw new ExplorerHdScanError("raw transaction verifier returned duplicate output indexes");
     }
     seenVouts.add(vout);
-    return Object.freeze({
+    const parsed: ExplorerHdVerifiedOutput = {
       vout,
       scriptPubKeyHex: scriptHex(
         output["scriptPubKeyHex"],
@@ -421,6 +473,11 @@ function parseVerifiedTransaction(
         output["valueAtomic"],
         `verified transaction.outputs[${index}].valueAtomic`,
       ),
+    };
+    if (output["blinding"] === undefined) return Object.freeze(parsed);
+    return Object.freeze({
+      ...parsed,
+      blinding: parseBlinding(output["blinding"], `verified transaction.outputs[${index}].blinding`),
     });
   });
   outputs.sort((left, right) => left.vout - right.vout);
@@ -809,7 +866,20 @@ export class ExplorerHdScanner {
         ) {
           throw new ExplorerHdScanError("verified funding output value disagrees with explorer");
         }
-        utxos.push(Object.freeze({
+        if (output.blinding !== undefined && reference.explorerAssetId !== undefined) {
+          throw new ExplorerHdScanError("explorer reports a confidential output as explicit");
+        }
+        if (
+          reference.explorerValueCommitment !== undefined
+          && (
+            output.blinding === undefined
+            || output.blinding.valueCommitmentHex !== reference.explorerValueCommitment
+            || output.blinding.assetCommitmentHex !== reference.explorerAssetCommitment
+          )
+        ) {
+          throw new ExplorerHdScanError("verified funding output commitments disagree with explorer");
+        }
+        const utxo: ExplorerHdVerifiedUtxo = {
           chain: reference.chain,
           index: reference.index,
           address: reference.address,
@@ -819,7 +889,8 @@ export class ExplorerHdScanner {
           assetId: output.assetId,
           valueAtomic: output.valueAtomic,
           status: reference.status,
-        }));
+        };
+        utxos.push(Object.freeze(output.blinding === undefined ? utxo : { ...utxo, blinding: output.blinding }));
       }
       transactions.push(Object.freeze({
         txid: item.txid,

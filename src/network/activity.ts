@@ -4,6 +4,11 @@
  * DISPLAY-ONLY: this data comes straight from the configured explorer and is
  * not verified by the wallet core. It must never be used to build or approve
  * transactions, and the UI must not label it as verified.
+ *
+ * Confidential wallet outputs carry no explicit asset/value in Esplora JSON.
+ * When an `unblind` callback is supplied (the unlocked session unblinds them
+ * locally with the wallet core), their amounts are filled in and the entry is
+ * marked `confidential`; otherwise they stay uncounted (`complete: false`).
  */
 import type { FetchImplementation } from "./esplora.js";
 import { esploraApiBase, fetchJson } from "./http.js";
@@ -56,7 +61,16 @@ export interface ActivityEntry {
   readonly issuedAssetId: string | null;
   /** False if some wallet-relevant amounts were confidential and could not be counted. */
   readonly complete: boolean;
+  /** Present (true) only when some wallet amount was confidential and was unblinded locally. */
+  readonly confidential?: true;
 }
+
+/** Locally unblinded wallet outputs keyed by `txid:vout`. */
+export type UnblindedOutputs = ReadonlyMap<string, { readonly assetId: string; readonly valueAtomic: string }>;
+
+export type ConfidentialUnblinder = (
+  refs: readonly { readonly txid: string; readonly vout: number; readonly scriptPubKeyHex: string }[],
+) => Promise<UnblindedOutputs>;
 
 export class ActivityParseError extends Error {
   override readonly name = "ActivityParseError";
@@ -129,32 +143,48 @@ export function parseEsploraTx(value: unknown): EsploraTx {
 }
 
 /** Compute the wallet-relative view of one transaction. */
-export function computeActivity(tx: EsploraTx, walletScripts: ReadonlySet<string>, policyAsset: string): ActivityEntry {
+export function computeActivity(
+  tx: EsploraTx,
+  walletScripts: ReadonlySet<string>,
+  policyAsset: string,
+  unblinded: UnblindedOutputs = new Map(),
+): ActivityEntry {
   const totals = new Map<string, bigint>();
   const add = (assetId: string, amount: bigint) => totals.set(assetId, (totals.get(assetId) ?? 0n) + amount);
   let complete = true;
+  let confidential = false;
+  // Explorer amounts, or the locally unblinded ones for confidential outputs.
+  const amountOf = (output: EsploraOutput, outpoint: string): { assetId: string; value: bigint } | null => {
+    if (output.assetId !== null && output.value !== null) return { assetId: output.assetId, value: output.value };
+    const known = unblinded.get(outpoint);
+    if (known === undefined) return null;
+    confidential = true;
+    return { assetId: known.assetId, value: BigInt(known.valueAtomic) };
+  };
   let ownInputs = 0;
   let foreignInputs = 0;
   let issuedAssetId: string | null = null;
   for (const input of tx.vin) {
     if (input.prevout !== null && walletScripts.has(input.prevout.scriptPubKeyHex)) {
       ownInputs += 1;
-      if (input.prevout.assetId === null || input.prevout.value === null) complete = false;
-      else add(input.prevout.assetId, -input.prevout.value);
+      const spent = amountOf(input.prevout, `${input.txid}:${input.vout}`);
+      if (spent === null) complete = false;
+      else add(spent.assetId, -spent.value);
       if (input.issuance !== null && !input.issuance.isReissuance) issuedAssetId = input.issuance.assetId;
     } else {
       foreignInputs += 1;
     }
   }
   let fee = 0n;
-  for (const output of tx.vout) {
+  for (const [index, output] of tx.vout.entries()) {
     if (output.type === "fee") {
       if (output.assetId === policyAsset && output.value !== null) fee += output.value;
       continue;
     }
     if (walletScripts.has(output.scriptPubKeyHex)) {
-      if (output.assetId === null || output.value === null) complete = false;
-      else add(output.assetId, output.value);
+      const received = amountOf(output, `${tx.txid}:${index}`);
+      if (received === null) complete = false;
+      else add(received.assetId, received.value);
     }
   }
   const paidFee = ownInputs > 0 && foreignInputs === 0;
@@ -188,7 +218,29 @@ export function computeActivity(tx: EsploraTx, walletScripts: ReadonlySet<string
     counterparty,
     issuedAssetId,
     complete,
+    ...(confidential ? { confidential: true as const } : {}),
   });
+}
+
+/** Wallet outputs and spent wallet prevouts whose explorer amounts are confidential. */
+export function confidentialWalletOutputs(
+  txs: readonly EsploraTx[],
+  walletScripts: ReadonlySet<string>,
+): { txid: string; vout: number; scriptPubKeyHex: string }[] {
+  const refs = new Map<string, { txid: string; vout: number; scriptPubKeyHex: string }>();
+  const hidden = (output: EsploraOutput) =>
+    walletScripts.has(output.scriptPubKeyHex) && (output.assetId === null || output.value === null);
+  for (const tx of txs) {
+    for (const [vout, output] of tx.vout.entries()) {
+      if (output.type !== "fee" && hidden(output)) refs.set(`${tx.txid}:${vout}`, { txid: tx.txid, vout, scriptPubKeyHex: output.scriptPubKeyHex });
+    }
+    for (const input of tx.vin) {
+      if (input.prevout !== null && hidden(input.prevout)) {
+        refs.set(`${input.txid}:${input.vout}`, { txid: input.txid, vout: input.vout, scriptPubKeyHex: input.prevout.scriptPubKeyHex });
+      }
+    }
+  }
+  return [...refs.values()];
 }
 
 /** Fetch every page of an address's history (bounded). */
@@ -219,6 +271,8 @@ export interface LoadActivityOptions {
   readonly policyAsset: string;
   readonly fetchImpl: FetchImplementation;
   readonly limit?: number;
+  /** Unblind confidential wallet amounts locally (unlocked session only). */
+  readonly unblind?: ConfidentialUnblinder;
 }
 
 /** Merge per-address histories into wallet activity, newest first (pending on top). */
@@ -235,7 +289,17 @@ export async function loadActivity(options: LoadActivityOptions): Promise<Activi
     }
   });
   await Promise.all(workers);
-  return sortActivity([...byTxid.values()].map((tx) => computeActivity(tx, scripts, options.policyAsset)))
+  const txs = [...byTxid.values()];
+  let unblinded: UnblindedOutputs = new Map();
+  const hidden = options.unblind === undefined ? [] : confidentialWalletOutputs(txs, scripts);
+  if (options.unblind !== undefined && hidden.length > 0) {
+    try {
+      unblinded = await options.unblind(hidden);
+    } catch {
+      // Display-only: confidential amounts simply stay uncounted.
+    }
+  }
+  return sortActivity(txs.map((tx) => computeActivity(tx, scripts, options.policyAsset, unblinded)))
     .slice(0, options.limit ?? 200);
 }
 

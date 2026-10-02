@@ -190,6 +190,15 @@ for (const target of targets) {
       || typeof derived.native_address !== "string"
       || !derived.native_address.startsWith(`${compiled.bech32Hrp}1`)
     ) throw new Error(`${target} packaged wallet core derivation smoke test failed`);
+    // Confidential receive is opt-in: off by default, SLIP-77 when requested.
+    const confidential = JSON.parse(core.derive_address_json("external", 0, true));
+    if (
+      "confidential_address" in derived
+      || typeof core.set_confidential_receive !== "function"
+      || confidential.native_address !== derived.native_address
+      || typeof confidential.confidential_address !== "string"
+      || !confidential.confidential_address.startsWith(`${compiled.blech32Hrp}1`)
+    ) throw new Error(`${target} packaged wallet core confidential derivation smoke test failed`);
     const prepared = JSON.parse(core.prepare_transfer_json(JSON.stringify({
       recipient: recipient.native_address,
       asset_id: compiled.nativeAssetId,

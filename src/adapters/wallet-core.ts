@@ -20,7 +20,11 @@ const MAX_LIST = 10_000;
 // ---------------------------------------------------------------------------
 
 export interface WasmWalletCoreInstance {
-  derive_address_json(branch: string, index: number): string;
+  /** `confidential` overrides the wallet default; omitted keeps it (explicit unless enabled). */
+  derive_address_json(branch: string, index: number, confidential?: boolean | null): string;
+  /** Make default receive addresses confidential (SLIP-77). Off unless called. */
+  set_confidential_receive?(enabled: boolean): void;
+  /** Explicit outputs, plus confidential outputs that unblind with this wallet's key. */
   verify_raw_transaction_json(requestJson: string): string;
   prepare_transfer_json(requestJson: string): string;
   prepare_issuance_json(requestJson: string): string;
@@ -60,7 +64,13 @@ export type TxKind = "transfer" | "issuance" | "swap_offer" | "swap_take" | "off
 export type Sighash = "ALL" | "SINGLE|ANYONECANPAY";
 
 export interface AssetDelta { readonly assetId: string; readonly amount: string }
-export interface ExternalOutput { readonly address: string; readonly assetId: string; readonly amount: string }
+/** `confidential` is present (true) only for a blinded output; `address` is then its confidential address. */
+export interface ExternalOutput {
+  readonly address: string;
+  readonly assetId: string;
+  readonly amount: string;
+  readonly confidential?: true;
+}
 export interface IssuanceReview {
   readonly assetId: string;
   readonly tokenId: string | null;
@@ -81,6 +91,8 @@ export interface TxReview {
   readonly foreignInputs: readonly string[];
   readonly issuance: IssuanceReview | null;
   readonly sighash: Sighash;
+  /** Present (true) only when some input or output is confidential; amounts are still exact. */
+  readonly confidential?: true;
 }
 
 export interface PreparedTx {
@@ -126,8 +138,19 @@ export interface VerifiedIssuance {
 export interface DerivedAddress {
   readonly branch: "external" | "change";
   readonly index: number;
+  /** Unconfidential address (identifies the script; used for explorer lookups). */
   readonly address: string;
   readonly scriptPubKeyHex: string;
+  /** Confidential (SLIP-77 blinded) form of `address`, only when requested/enabled. */
+  readonly confidentialAddress?: string;
+}
+
+/** Commitments and blinders of a confidential output, exactly as the core returned them. */
+export interface OutputBlinding {
+  readonly assetCommitmentHex: string;
+  readonly valueCommitmentHex: string;
+  readonly assetBlinderHex: string;
+  readonly valueBlinderHex: string;
 }
 
 export interface VerifiedTransactionOutput {
@@ -135,6 +158,8 @@ export interface VerifiedTransactionOutput {
   readonly scriptPubKeyHex: string;
   readonly assetId: string;
   readonly valueAtomic: string;
+  /** Present only for a confidential output that unblinded with this wallet's key. */
+  readonly blinding?: OutputBlinding;
 }
 
 export interface VerifiedTransaction {
@@ -142,7 +167,15 @@ export interface VerifiedTransaction {
   readonly outputs: readonly VerifiedTransactionOutput[];
 }
 
-/** `VerifiedUtxo` request shape (spec §1.3). */
+/** Core `UtxoBlinding` JSON (snake_case). */
+export interface CoreUtxoBlinding {
+  readonly asset_commitment_hex: string;
+  readonly value_commitment_hex: string;
+  readonly asset_blinder_hex: string;
+  readonly value_blinder_hex: string;
+}
+
+/** `VerifiedUtxo` request shape (spec §1.3). `blinding` only for a confidential UTXO. */
 export interface CoreUtxo {
   readonly txid: string;
   readonly vout: number;
@@ -151,6 +184,17 @@ export interface CoreUtxo {
   readonly script_pubkey_hex: string;
   readonly branch: "external" | "change";
   readonly index: number;
+  readonly blinding?: CoreUtxoBlinding;
+}
+
+/** Map validated output blinding to the core's request shape. */
+export function coreUtxoBlinding(blinding: OutputBlinding): CoreUtxoBlinding {
+  return Object.freeze({
+    asset_commitment_hex: blinding.assetCommitmentHex,
+    value_commitment_hex: blinding.valueCommitmentHex,
+    asset_blinder_hex: blinding.assetBlinderHex,
+    value_blinder_hex: blinding.valueBlinderHex,
+  });
 }
 
 export interface AssetContract {
@@ -248,7 +292,7 @@ function list<T>(value: unknown, label: string, parse: (entry: unknown, index: n
   return value.map(parse);
 }
 
-function explicitAddress(value: unknown, label: string): string {
+function explicitAddress(value: unknown, label: string, confidential = false): string {
   const supplied = str(value, label, 200);
   let resolved;
   try {
@@ -256,8 +300,32 @@ function explicitAddress(value: unknown, label: string): string {
   } catch {
     return fail(`${label} is not an address on this network`);
   }
-  if (resolved.confidential) fail(`${label} is confidential`);
+  if (resolved.confidential !== confidential) fail(confidential ? `${label} is not confidential` : `${label} is confidential`);
   return resolved.canonical;
+}
+
+const COMMITMENT = /^0[89ab][0-9a-f]{64}$/u;
+
+function commitment(value: unknown, label: string): string {
+  if (typeof value !== "string" || !COMMITMENT.test(value)) fail(`${label} is not a 33-byte commitment`);
+  return value;
+}
+
+/** Parse the core's snake_case `UtxoBlinding` into camelCase. */
+export function parseOutputBlinding(value: unknown, label: string): OutputBlinding {
+  const data = rec(value, label, ["asset_commitment_hex", "value_commitment_hex", "asset_blinder_hex", "value_blinder_hex"]);
+  return Object.freeze({
+    assetCommitmentHex: commitment(data["asset_commitment_hex"], `${label} asset commitment`),
+    valueCommitmentHex: commitment(data["value_commitment_hex"], `${label} value commitment`),
+    assetBlinderHex: hash32(data["asset_blinder_hex"], `${label} asset blinder`),
+    valueBlinderHex: hash32(data["value_blinder_hex"], `${label} value blinder`),
+  });
+}
+
+function trueFlag(value: unknown, label: string): boolean {
+  if (value === undefined) return false;
+  if (value !== true) fail(`${label} must be true when present`);
+  return true;
 }
 
 const KINDS: Record<string, TxKind> = {
@@ -283,7 +351,7 @@ export function parseTxReview(value: unknown): TxReview {
   const data = rec(value, "review", [
     "kind", "network", "genesis_hash", "balance_changes", "fee", "external_outputs",
     "inputs_signed", "foreign_inputs", "sighash",
-  ], ["issuance"]);
+  ], ["issuance", "confidential"]);
   const balanceChanges = list(data["balance_changes"], "balance changes", (entry, index) => {
     const delta = rec(entry, `balance change ${index}`, ["asset_id", "amount"]);
     return Object.freeze({
@@ -295,11 +363,13 @@ export function parseTxReview(value: unknown): TxReview {
     fail("review lists an asset twice");
   }
   const externalOutputs = list(data["external_outputs"], "external outputs", (entry, index) => {
-    const output = rec(entry, `external output ${index}`, ["address", "asset_id", "amount"]);
+    const output = rec(entry, `external output ${index}`, ["address", "asset_id", "amount"], ["confidential"]);
+    const confidential = trueFlag(output["confidential"], `external output ${index} confidential flag`);
     return Object.freeze({
-      address: explicitAddress(output["address"], `external output ${index} address`),
+      address: explicitAddress(output["address"], `external output ${index} address`, confidential),
       assetId: hash32(output["asset_id"], `external output ${index} asset`),
       amount: unsignedAmount(output["amount"], `external output ${index} amount`),
+      ...(confidential ? { confidential: true as const } : {}),
     });
   });
   const inputsSigned = list(data["inputs_signed"], "signed inputs", (entry, index) => outpoint(entry, `signed input ${index}`));
@@ -318,8 +388,16 @@ export function parseTxReview(value: unknown): TxReview {
       contractHash: hash32(raw["contract_hash"], "contract hash"),
     });
   }
+  const reviewKind = kind(data["kind"]);
+  const confidential = trueFlag(data["confidential"], "review confidential flag");
+  if (confidential && (reviewKind === "swap_offer" || reviewKind === "swap_take")) {
+    fail("swap reviews must be fully explicit");
+  }
+  if (!confidential && externalOutputs.some((output) => output.confidential === true)) {
+    fail("review has a confidential output but is not marked confidential");
+  }
   return Object.freeze({
-    kind: kind(data["kind"]),
+    kind: reviewKind,
     network: str(data["network"], "review network", 64),
     genesisHash: hash32(data["genesis_hash"], "review genesis"),
     balanceChanges: Object.freeze(balanceChanges),
@@ -329,6 +407,7 @@ export function parseTxReview(value: unknown): TxReview {
     foreignInputs: Object.freeze(foreignInputs),
     issuance,
     sighash: sighash(data["sighash"]),
+    ...(confidential ? { confidential: true as const } : {}),
   });
 }
 
@@ -407,11 +486,23 @@ export function parseVerifiedIssuance(json: unknown): VerifiedIssuance {
 export function parseDerivedAddress(json: unknown, branch: "external" | "change", index: number): DerivedAddress {
   const data = rec(parseJson(json, "derived address"), "derived address", [
     "branch", "index", "derivation_path", "native_address", "lwk_alias", "script_pubkey_hex",
-  ]);
+  ], ["confidential_address", "confidential_lwk_alias", "blinding_pubkey_hex"]);
   if (data["branch"] !== branch || data["index"] !== index) fail("core derived a different branch or index");
   const address = explicitAddress(data["native_address"], "derived address");
   if (explicitAddress(data["lwk_alias"], "derived alias") !== address) fail("derived aliases disagree");
-  return Object.freeze({ branch, index, address, scriptPubKeyHex: hex(data["script_pubkey_hex"], "derived script", 20_000) });
+  const scriptPubKeyHex = hex(data["script_pubkey_hex"], "derived script", 20_000);
+  const hasConfidential = data["confidential_address"] !== undefined;
+  if (
+    hasConfidential !== (data["confidential_lwk_alias"] !== undefined)
+    || hasConfidential !== (data["blinding_pubkey_hex"] !== undefined)
+  ) fail("derived confidential address is incomplete");
+  if (!hasConfidential) return Object.freeze({ branch, index, address, scriptPubKeyHex });
+  const confidentialAddress = explicitAddress(data["confidential_address"], "derived confidential address", true);
+  if (explicitAddress(data["confidential_lwk_alias"], "derived confidential alias", true) !== confidentialAddress) {
+    fail("derived confidential aliases disagree");
+  }
+  hex(data["blinding_pubkey_hex"], "derived blinding key", 66);
+  return Object.freeze({ branch, index, address, scriptPubKeyHex, confidentialAddress });
 }
 
 export function parseVerifiedTransaction(json: unknown, expectedTxid: string): VerifiedTransaction {
@@ -420,16 +511,19 @@ export function parseVerifiedTransaction(json: unknown, expectedTxid: string): V
   if (txid !== expectedTxid) fail("core verified a different transaction");
   const seen = new Set<number>();
   const outputs = list(data["outputs"], "verified outputs", (entry, index) => {
-    const output = rec(entry, `verified output ${index}`, ["vout", "scriptPubKeyHex", "assetId", "valueAtomic"]);
+    const output = rec(entry, `verified output ${index}`, ["vout", "scriptPubKeyHex", "assetId", "valueAtomic"], ["blinding"]);
     const vout = nonNegativeInt(output["vout"], `verified output ${index} vout`, 0xffff_ffff);
     if (seen.has(vout)) fail("core returned a duplicate output");
     seen.add(vout);
-    return Object.freeze({
+    const parsed = {
       vout,
       scriptPubKeyHex: hex(output["scriptPubKeyHex"], `verified output ${index} script`, 20_000),
       assetId: hash32(output["assetId"], `verified output ${index} asset`),
       valueAtomic: unsignedAmount(output["valueAtomic"], `verified output ${index} value`),
-    });
+    };
+    return Object.freeze(output["blinding"] === undefined
+      ? parsed
+      : { ...parsed, blinding: parseOutputBlinding(output["blinding"], `verified output ${index} blinding`) });
   });
   return Object.freeze({ txid, outputs: Object.freeze(outputs) });
 }
@@ -443,9 +537,26 @@ export class WalletCoreSession {
     this.#core = core;
   }
 
-  deriveAddress(branch: "external" | "change", index: number): DerivedAddress {
+  /**
+   * Derive an address. Without `confidential` the core's default applies
+   * (unconfidential unless `enableConfidentialReceive` was called).
+   */
+  deriveAddress(branch: "external" | "change", index: number, confidential?: boolean): DerivedAddress {
     this.#open();
-    return parseDerivedAddress(this.#core.derive_address_json(branch, index), branch, index);
+    const json = confidential === undefined
+      ? this.#core.derive_address_json(branch, index)
+      : this.#core.derive_address_json(branch, index, confidential);
+    const derived = parseDerivedAddress(json, branch, index);
+    if (confidential === true && derived.confidentialAddress === undefined) fail("core did not derive a confidential address");
+    if (confidential === false && derived.confidentialAddress !== undefined) fail("core derived an unrequested confidential address");
+    return derived;
+  }
+
+  /** Make default receive addresses confidential (profile opt-in). */
+  enableConfidentialReceive(): void {
+    this.#open();
+    if (typeof this.#core.set_confidential_receive !== "function") fail("wallet core does not support confidential receive");
+    this.#core.set_confidential_receive(true);
   }
 
   verifyRawTransaction(request: {
@@ -521,7 +632,11 @@ export class WalletCore {
     return (await this.#core()).validate_mnemonic(normalizeMnemonic(mnemonic)) === true;
   }
 
-  async open(mnemonic: string, identity: NetworkIdentity): Promise<WalletCoreSession> {
+  async open(
+    mnemonic: string,
+    identity: NetworkIdentity,
+    options: { readonly confidentialReceive?: boolean } = {},
+  ): Promise<WalletCoreSession> {
     const bindings = await this.#core();
     const normalized = normalizeMnemonic(mnemonic);
     if (!bindings.validate_mnemonic(normalized)) fail("invalid recovery phrase");
@@ -533,7 +648,16 @@ export class WalletCore {
     } else {
       instance = new bindings.WasmWalletCore(normalized);
     }
-    return new WalletCoreSession(instance);
+    const session = new WalletCoreSession(instance);
+    if (options.confidentialReceive === true) {
+      try {
+        session.enableConfidentialReceive();
+      } catch (error) {
+        session.free();
+        throw error;
+      }
+    }
+    return session;
   }
 
   async verifyAssetIssuance(request: {

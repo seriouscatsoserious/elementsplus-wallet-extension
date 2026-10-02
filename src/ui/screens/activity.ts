@@ -60,6 +60,8 @@ function row(app: App, entry: ActivityEntry, tokens: Tokens): HTMLElement {
   } else {
     sub = entry.kind === "self" ? "Self-transfer" : "";
   }
+  // Amounts of confidential wallet outputs were unblinded locally.
+  if (entry.confidential === true) sub = sub === "" ? "Confidential" : `${sub} · Confidential`;
   const positive = primary !== undefined && !primary.amount.startsWith("-");
   const statusText = entry.confirmed ? "Confirmed" : "In mempool";
   const explorer = app.status?.settings.explorerUrl;
