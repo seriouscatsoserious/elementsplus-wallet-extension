@@ -2,15 +2,16 @@
 //! (`src/network/explorer-hd-scan.ts`): external and change branches are
 //! scanned until `gap_limit` consecutive unused addresses, address stats are
 //! cross-checked against the UTXO list, and every funding transaction is
-//! fetched raw and verified locally with `verify_raw_transaction` before its
-//! outputs become spendable `VerifiedUtxo`s.
+//! fetched raw and verified locally with `WalletCore::verify_raw_transaction`
+//! before its outputs become spendable `VerifiedUtxo`s. Confidential outputs
+//! that unblind with this wallet's SLIP-77 key are spendable too (they carry
+//! their blinding); anything else is skipped.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, Context, Result};
 use elementsplus_wallet_core::{
-    verify_raw_transaction, Branch, ExpectedWalletOutput, RawTransactionVerificationRequest,
-    VerifiedUtxo, WalletCore,
+    Branch, ExpectedWalletOutput, RawTransactionVerificationRequest, VerifiedUtxo, WalletCore,
 };
 use serde::Serialize;
 
@@ -221,10 +222,10 @@ pub fn scan(
                 }],
             };
             let label = format!("{txid}:{}", reference.utxo.vout);
-            let verified = match verify_raw_transaction(&request) {
+            let verified = match core.verify_raw_transaction(&request) {
                 Ok(verified) => verified,
                 Err(error) => {
-                    // Non-explicit or mismatching outputs are never spendable.
+                    // Foreign-blinded or mismatching outputs are never spendable.
                     snapshot.skipped.push(format!("{label}: {error}"));
                     continue;
                 }
@@ -251,6 +252,7 @@ pub fn scan(
                     script_pubkey_hex: reference.script_hex.clone(),
                     branch: reference.branch,
                     index: reference.index,
+                    blinding: output.blinding.clone(),
                 },
                 address: reference.address.clone(),
                 confirmed: reference.utxo.status.confirmed,
