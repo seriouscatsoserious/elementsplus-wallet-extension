@@ -1,4 +1,6 @@
-//! A deliberately narrow signing core for an ECX Alpha browser wallet.
+//! A deliberately narrow signing core for the Elements+ (eCash Elements
+//! sidechain) browser wallet and `epw` CLI. Chain pins come from the typed
+//! profile registry in [`network`].
 //!
 //! The crate owns no network client and trusts no explorer response by itself.
 //! A caller supplies UTXOs that it has independently verified; this core then
@@ -25,8 +27,6 @@ use elements::{
     Address, AddressParams, AssetId, BlockHash, OutPoint, Script, Transaction, TxOut, TxOutWitness,
     Txid, WPubkeyHash,
 };
-use elementsplus_lwk_adapter::{lwk_network, NATIVE_ADDRESS_PARAMS};
-pub use elementsplus_lwk_adapter::{GENESIS_HASH, NETWORK_NAME, POLICY_ASSET};
 #[cfg(feature = "regtest")]
 use lwk_common::ElementsParamsBuilder;
 use lwk_common::{Network, Signer};
@@ -38,6 +38,7 @@ use thiserror::Error;
 pub mod amount;
 mod build;
 pub mod issuance;
+pub mod network;
 pub mod offer;
 mod review;
 mod sign;
@@ -52,7 +53,7 @@ pub use issuance::{
     verify_asset_issuance, AssetContract, AssetIssuanceVerificationRequest, VerifiedAssetIssuance,
     MAX_MONEY,
 };
-pub use offer::{DecodedOffer, Offer, OfferLeg, OFFER_NETWORK, OFFER_VERSION};
+pub use offer::{DecodedOffer, Offer, OfferLeg, OFFER_VERSION};
 pub use review::{
     AssetDelta, ExternalOutput, IssuanceReview, PreparedTx, SignedResult, TxKind, TxReview,
     SIGHASH_ALL, SIGHASH_SINGLE_ACP,
@@ -119,6 +120,8 @@ pub enum WalletError {
     Issuance(String),
     #[error("JSON request is invalid: {0}")]
     Json(String),
+    #[error(transparent)]
+    Network(#[from] network::NetworkProfileError),
 }
 
 /// External addresses are branch 0 and change addresses are branch 1.
@@ -284,7 +287,8 @@ pub fn verify_raw_transaction(
     })
 }
 
-/// Decode and verify a swap offer for the pinned ECX Alpha network.
+/// Decode and verify a swap offer for the network profile compiled into this
+/// build (see [`network::compiled_profile`]).
 ///
 /// The funding transaction is supplied separately and must hash to the
 /// offered input's txid; the maker's `SIGHASH_SINGLE|ANYONECANPAY` signature
@@ -293,10 +297,26 @@ pub fn decode_offer(
     offer_json: &str,
     prevout_raw_tx_hex: &str,
 ) -> Result<DecodedOffer, WalletError> {
+    decode_offer_for_profile(network::compiled_profile()?, offer_json, prevout_raw_tx_hex)
+}
+
+/// Decode and verify a swap offer against an explicit public profile. Pending
+/// profiles are refused; archived profiles verify historical offers.
+pub fn decode_offer_for_profile(
+    profile: &network::NetworkProfile,
+    offer_json: &str,
+    prevout_raw_tx_hex: &str,
+) -> Result<DecodedOffer, WalletError> {
+    let pins = profile.resolve_pins()?;
     let offer = offer::parse_offer_json(offer_json)?;
-    let genesis = BlockHash::from_str(GENESIS_HASH).expect("frozen genesis hash");
-    offer::verify_offer(&offer, prevout_raw_tx_hex, genesis, &NATIVE_ADDRESS_PARAMS)
-        .map(|verified| verified.decoded)
+    offer::verify_offer(
+        &offer,
+        prevout_raw_tx_hex,
+        profile.id,
+        pins.genesis_hash,
+        pins.address.native,
+    )
+    .map(|verified| verified.decoded)
 }
 
 #[derive(Clone)]
@@ -313,6 +333,8 @@ pub(crate) struct ParsedUtxo {
 pub struct WalletCore {
     pub(crate) signer: SwSigner,
     pub(crate) network: Network,
+    /// Profile id; carried as `network` in every swap offer.
+    pub(crate) network_id: String,
     pub(crate) network_name: String,
     pub(crate) policy_asset: AssetId,
     pub(crate) genesis_hash: BlockHash,
@@ -336,23 +358,60 @@ impl WalletCore {
             .map_err(|_| WalletError::MnemonicGeneration)
     }
 
-    /// Open an in-memory signer. The mnemonic is never exposed again by this API.
-    pub fn new(mnemonic: &str) -> Result<Self, WalletError> {
+    /// Open an in-memory signer on the network profile compiled into this
+    /// build. Fails closed when the build has no live profile.
+    pub fn for_compiled_profile(mnemonic: &str) -> Result<Self, WalletError> {
+        Self::for_profile(mnemonic, network::compiled_profile()?)
+    }
+
+    /// Open an in-memory signer on a live public profile. Pending profiles
+    /// (unknown sidechain pins) and archived profiles are refused.
+    pub fn for_profile(
+        mnemonic: &str,
+        profile: &'static network::NetworkProfile,
+    ) -> Result<Self, WalletError> {
+        profile.ensure_selectable()?;
+        Self::from_profile_pins(mnemonic, profile)
+    }
+
+    /// Open a signer on an archived profile. Exists only so historical test
+    /// vectors for retired chains keep verifying; never reachable from a build
+    /// or CLI profile selection.
+    pub fn for_archived_profile(
+        mnemonic: &str,
+        profile: &'static network::NetworkProfile,
+    ) -> Result<Self, WalletError> {
+        if profile.status != network::ProfileStatus::Archived {
+            return Err(WalletError::InvalidRequest(format!(
+                "network profile {:?} is not archived",
+                profile.id
+            )));
+        }
+        Self::from_profile_pins(mnemonic, profile)
+    }
+
+    fn from_profile_pins(
+        mnemonic: &str,
+        profile: &'static network::NetworkProfile,
+    ) -> Result<Self, WalletError> {
+        let pins = profile.resolve_pins()?;
         Self::new_for_network(
             mnemonic,
-            lwk_network(),
-            NETWORK_NAME,
-            &NATIVE_ADDRESS_PARAMS,
-            &AddressParams::ELEMENTS,
+            pins.network,
+            profile.id,
+            profile.display_name,
+            pins.address.native,
+            pins.address.alias,
         )
     }
 
     /// Construct the same signing engine for an explicitly supplied Elements
     /// network. This native-only seam exists for funded regtest integration
-    /// tests; the production browser/WASM API exposes ECX Alpha only.
+    /// tests; the production browser/WASM API exposes only its compiled profile.
     pub fn new_for_network(
         mnemonic: &str,
         network: Network,
+        network_id: impl Into<String>,
         network_name: impl Into<String>,
         native_address_params: &'static AddressParams,
         alias_address_params: &'static AddressParams,
@@ -363,6 +422,7 @@ impl WalletCore {
         Ok(Self {
             signer,
             network,
+            network_id: network_id.into(),
             network_name: network_name.into(),
             policy_asset: *network.policy_asset(),
             genesis_hash: network.genesis_hash(),
@@ -397,15 +457,25 @@ impl WalletCore {
         Self::new_for_network(
             mnemonic,
             network,
+            network::ELEMENTSPLUS_REGTEST.id,
             display_name,
-            &AddressParams::ELEMENTS,
-            &AddressParams::ELEMENTS,
+            network::ELEMENTSPLUS_REGTEST
+                .address
+                .map_or(&AddressParams::ELEMENTS, |a| a.native),
+            network::ELEMENTSPLUS_REGTEST
+                .address
+                .map_or(&AddressParams::ELEMENTS, |a| a.alias),
         )
     }
 
     /// The configured policy (fee) asset.
     pub fn policy_asset(&self) -> AssetId {
         self.policy_asset
+    }
+
+    /// The configured network profile id (the offer `network` field).
+    pub fn network_id(&self) -> &str {
+        &self.network_id
     }
 
     /// The configured genesis hash.
@@ -449,6 +519,7 @@ impl WalletCore {
         offer::verify_offer(
             &offer,
             prevout_raw_tx_hex,
+            &self.network_id,
             self.genesis_hash,
             self.native_address_params,
         )

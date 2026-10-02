@@ -141,6 +141,7 @@ fn regtest_core(cli: &ElementsCli, mnemonic: &str) -> WalletCore {
     WalletCore::new_for_network(
         mnemonic,
         network,
+        "elementsplus-regtest",
         "funded Elements+ regtest",
         &AddressParams::ELEMENTS,
         &AddressParams::ELEMENTS,

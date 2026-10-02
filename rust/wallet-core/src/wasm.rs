@@ -29,9 +29,11 @@ pub struct WasmWalletCore {
 
 #[wasm_bindgen]
 impl WasmWalletCore {
+    /// Open a wallet on the network profile compiled into this WASM build.
+    /// Pins are never caller-supplied; a pending or missing profile fails.
     #[wasm_bindgen(constructor)]
     pub fn new(mnemonic: &str) -> Result<WasmWalletCore, JsValue> {
-        WalletCore::new(mnemonic)
+        WalletCore::for_compiled_profile(mnemonic)
             .map(|inner| Self { inner })
             .map_err(js_error)
     }
@@ -110,7 +112,7 @@ impl WasmWalletCore {
     }
 
     /// Decode an offer against this wallet's configured network (the free
-    /// `decode_offer_json` is pinned to ECX Alpha).
+    /// `decode_offer_json` uses the compiled profile).
     pub fn decode_offer_json(
         &self,
         offer_json: &str,
@@ -142,7 +144,13 @@ pub fn verify_asset_issuance_json(request_json: &str) -> Result<String, JsValue>
     to_json(&verify_asset_issuance(&request).map_err(js_error)?)
 }
 
-/// Verify an offer for the pinned ECX Alpha network.
+/// Id of the network profile compiled into this build, if any.
+#[wasm_bindgen]
+pub fn network_profile_id() -> Option<String> {
+    network::COMPILED_PROFILE_ID.map(str::to_owned)
+}
+
+/// Verify an offer for the compiled network profile.
 #[wasm_bindgen]
 pub fn decode_offer_json(offer_json: &str, prevout_raw_tx_hex: &str) -> Result<String, JsValue> {
     to_json(&decode_offer(offer_json, prevout_raw_tx_hex).map_err(js_error)?)

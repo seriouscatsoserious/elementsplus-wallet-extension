@@ -81,7 +81,7 @@ pub fn discover_regtest(config: &mut Config) -> Result<bool> {
     if config.genesis_hash.is_some() && config.policy_asset.is_some() {
         return Ok(false);
     }
-    let esplora = Esplora::new(&config.esplora_url)?;
+    let esplora = Esplora::new(&config.esplora_url()?)?;
     let genesis = esplora.genesis_hash()?;
     if let Some(configured) = &config.genesis_hash {
         if *configured != genesis {
@@ -89,7 +89,7 @@ pub fn discover_regtest(config: &mut Config) -> Result<bool> {
         }
     }
     if config.policy_asset.is_none() {
-        let health = Dex::new(&config.dex_url)?
+        let health = Dex::new(&config.dex_url()?)?
             .health()
             .context("regtest policy_asset is not configured and the DEX /api/health is unreachable; set it with `epw config set policy_asset <hex>`")?;
         if health["genesis_hash"].as_str() != Some(genesis.as_str()) {
@@ -109,11 +109,12 @@ pub fn discover_regtest(config: &mut Config) -> Result<bool> {
 }
 
 pub fn chain_identity(config: &Config) -> Result<(String, String)> {
+    let profile = config.profile()?;
     match config.network {
-        NetworkKind::EcxAlpha => Ok((
-            elementsplus_wallet_core::GENESIS_HASH.to_owned(),
-            elementsplus_wallet_core::POLICY_ASSET.to_owned(),
-        )),
+        NetworkKind::EcxBeta | NetworkKind::EcxMainnet | NetworkKind::ArchivedAlpha => {
+            let pins = profile.resolve_pins().map_err(|e| anyhow!("{e}"))?;
+            Ok((pins.genesis_hash.to_string(), pins.policy_asset.to_string()))
+        }
         NetworkKind::Regtest => Ok((
             config
                 .genesis_hash
@@ -128,13 +129,14 @@ pub fn chain_identity(config: &Config) -> Result<(String, String)> {
 }
 
 pub fn open_core(config: &Config, mnemonic: &str) -> Result<WalletCore> {
+    let profile = config.profile()?;
     match config.network {
-        NetworkKind::EcxAlpha => WalletCore::new(mnemonic).map_err(|e| anyhow!("{e}")),
         NetworkKind::Regtest => {
             let (genesis, policy) = chain_identity(config)?;
-            WalletCore::new_for_regtest(mnemonic, &genesis, &policy, "regtest")
+            WalletCore::new_for_regtest(mnemonic, &genesis, &policy, profile.display_name)
                 .map_err(|e| anyhow!("{e}"))
         }
+        _ => WalletCore::for_profile(mnemonic, profile).map_err(|e| anyhow!("{e}")),
     }
 }
 
@@ -216,8 +218,8 @@ impl Wallet {
         let policy_file = PolicyFile::load(&home.policy())?;
         let state = LocalState::load(&home.state_file(&genesis_hash))?;
         let wallet = Self {
-            esplora: Esplora::new(&config.esplora_url)?,
-            dex: Dex::new(&config.dex_url)?,
+            esplora: Esplora::new(&config.esplora_url()?)?,
+            dex: Dex::new(&config.dex_url()?)?,
             home,
             config,
             core,
@@ -257,7 +259,11 @@ impl Wallet {
             return Vec::new();
         }
         self.registry_refreshed_at.set(now);
-        let entries = match fetch_registry(&self.config.registry_url()) {
+        let entries = match self
+            .config
+            .registry_url()
+            .and_then(|url| fetch_registry(&url))
+        {
             Ok(entries) => entries,
             Err(error) => return vec![format!("registry unavailable: {error}")],
         };
@@ -696,7 +702,7 @@ impl Wallet {
                             out["contract"] = serde_json::to_value(contract)?;
                             if *register {
                                 match crate::dex::Dex::new(registry_base(
-                                    &self.config.registry_url(),
+                                    &self.config.registry_url()?,
                                 ))
                                 .and_then(|d| {
                                     d.register_asset(&txid, 0, &serde_json::to_value(contract)?)
@@ -787,7 +793,7 @@ impl Wallet {
             description,
             &self.genesis_hash,
             self.origin.as_str(),
-            dex.then(|| self.config.dex_url.clone()),
+            dex.then(|| self.dex.base().to_owned()),
             steps,
         )
     }
@@ -1322,7 +1328,7 @@ impl Wallet {
                 reviews: &[],
                 policy_asset: &self.policy_asset,
                 genesis_hash: &self.genesis_hash,
-                dex_url: Some(&self.config.dex_url),
+                dex_url: Some(self.dex.base()),
             },
             audit::now(),
         );

@@ -1,4 +1,6 @@
-//! `epw`: headless, agent-friendly wallet for Elements+ (ECX Alpha).
+//! `epw`: headless, agent-friendly wallet for the Elements+ (eCash Elements)
+//! sidechain. The chain is selected by network profile id (`epw config set
+//! network <id>`); pending profiles are refused until their pins are published.
 
 mod amount;
 mod audit;
@@ -32,7 +34,7 @@ use crate::wallet::{error_json, Exec, Origin, PromptFn, Wallet};
 #[command(
     name = "epw",
     version,
-    about = "Headless ECX Alpha (Elements+) wallet with a signing policy and an MCP server"
+    about = "Headless Elements+ (eCash Elements sidechain) wallet with a signing policy and an MCP server"
 )]
 struct Cli {
     /// Machine-readable JSON output.
@@ -269,10 +271,13 @@ fn create_wallet(home: &Home, mnemonic: &str) -> Result<Value> {
     if wallet::discover_regtest(&mut cfg).unwrap_or(false) {
         cfg.save(home)?;
     }
-    if let Ok(core) = wallet::open_core(&cfg, mnemonic) {
-        if let Ok(addr) = core.derive_address(Branch::External, 0) {
-            out["first_address"] = addr.native_address.into();
+    match wallet::open_core(&cfg, mnemonic) {
+        Ok(core) => {
+            if let Ok(addr) = core.derive_address(Branch::External, 0) {
+                out["first_address"] = addr.native_address.into();
+            }
         }
+        Err(error) => out["network_error"] = error.to_string().into(),
     }
     Ok(out)
 }

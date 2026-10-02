@@ -10,8 +10,8 @@
 //! cargo test --test funded_regtest -- --ignored --test-threads=1 --nocapture
 //! ```
 //!
-//! The DEX must accept offers with `network = "ecx-alpha"` (the wallet core
-//! always emits that; run the server with the default `NETWORK_NAME`).
+//! Offers carry the profile id as `network` (`elementsplus-regtest` here), so
+//! run the DEX server with `NETWORK_NAME=elementsplus-regtest`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -77,7 +77,7 @@ impl Wallet {
             password: format!("pw-{name}-test"),
         };
         for (key, value) in [
-            ("network", "regtest"),
+            ("network", "elementsplus-regtest"),
             ("esplora_url", esplora),
             ("dex_url", dex),
         ] {

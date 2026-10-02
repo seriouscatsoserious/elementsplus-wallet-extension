@@ -251,7 +251,7 @@ impl<B: Backend> Server<B> {
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": { "tools": { "listChanged": false } },
                     "serverInfo": { "name": "epw", "title": "Elements+ headless wallet", "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": "ECX Alpha (Elements+) wallet. Amounts are strings: decimals in asset precision or atomic:<n>. Mutating tools are gated by the user's policy.toml; when a result has status approval_required, show the review and approve_command to the human and stop — never try to approve it yourself.",
+                    "instructions": "Elements+ (eCash Elements sidechain) wallet. Amounts are strings: decimals in asset precision or atomic:<n>. Mutating tools are gated by the user's policy.toml; when a result has status approval_required, show the review and approve_command to the human and stop — never try to approve it yourself.",
                 }),
             ),
             "ping" => rpc_result(id, json!({})),

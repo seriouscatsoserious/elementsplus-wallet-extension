@@ -1,6 +1,11 @@
 //! ECX Alpha compatibility helpers for the exact LWK revision pinned in
 //! `UPSTREAM_PINS.toml`.
 //!
+//! ECX Alpha is retired. The identity constants below are kept as the
+//! *archived* `ecx-alpha` profile so the recorded live-header vectors keep
+//! verifying; `elementsplus-wallet-core::network` is the registry wallets
+//! select from, and it never selects this profile.
+//!
 //! This crate is deliberately small. It proves the frozen network identity,
 //! parses and hashes the fork's extended block headers, and enforces the
 //! explicit-output policy at the wallet boundary. It does not claim to make
