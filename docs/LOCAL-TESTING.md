@@ -1,7 +1,8 @@
 # Local browser testing
 
-This repository builds the ECX Alpha Elements+ wallet extension for Chromium
-and Firefox. It packages its Rust/WASM signing core locally and supports wallet
+This repository builds the Elements+ wallet extension for Chromium and Firefox,
+one artifact per network profile (see `docs/NETWORKS.md`; while `ecx-beta` and
+`ecx-mainnet` are pending only the `elementsplus-regtest` artifact can be built). It packages its Rust/WASM signing core locally and supports wallet
 creation/restoration, explicit address derivation, explorer-backed balance
 discovery, native-ECX transfer review, local signing, and explorer broadcast.
 Issuance, reissuance, burning, confidential outputs, and non-native sends remain
@@ -59,17 +60,20 @@ install the extension or handle wallet keys.
    `edge://extensions` in Edge.
 2. Enable **Developer mode**.
 3. Select **Load unpacked**.
-4. Choose the repository's `dist/chromium` directory.
-5. Pin **Elements+ Wallet — ECX Alpha**, then click its toolbar icon.
+4. Choose the repository's `dist/chromium` directory (a public-profile build)
+   or `.regtest/dist/chromium` (the local regtest build).
+5. Pin **Elements+ Wallet — <profile display name>**, e.g. *eCash Beta ·
+   Elements*, then click its toolbar icon.
 
 Expected behavior:
 
 - the Windows 98-styled 400-by-620 wallet opens directly;
 - the network control changes from **Checking network** to **PINS MATCH** when
-  `explorer.bitnames.info` serves the pinned genesis and native asset;
+  the profile's Esplora serves the pinned genesis and native asset;
 - wallet setup can generate a new local recovery phrase;
 - after creating and unlocking a disposable test wallet, synchronization shows
-  an `elements1...` receive address and explorer-backed balances;
+  a receive address in the profile's native encoding (`elements1...` for the
+  v11 identity, `ert1...` on regtest) and explorer-backed balances;
 - send and receive are enabled, while issue/reissue/burn remain disabled.
 
 Use only a new disposable phrase and valueless test coins. A zero balance is
@@ -102,18 +106,19 @@ balances. Stop the preview server with `Ctrl-C`.
 ## Optional live explorer smoke test
 
 ```sh
-ECX_ALPHA_LIVE_TEST=1 npm run test:live
+ECX_LIVE_TEST=1 npm run test:live
 ```
 
 PowerShell:
 
 ```powershell
-$env:ECX_ALPHA_LIVE_TEST = "1"
+$env:ECX_LIVE_TEST = "1"
 npm run test:live
 ```
 
 This performs read-only requests and fails closed unless the explorer matches
-the pinned ECX Alpha genesis and policy asset. It never signs or broadcasts.
+the selected profile's pinned genesis and policy asset (`ECX_LIVE_PROFILE`,
+default `ecx-beta`; refused while pending). It never signs or broadcasts.
 
 ## Automated installed-extension smoke test
 
