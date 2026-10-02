@@ -40,9 +40,11 @@ epw config discover   # regtest: genesis from Esplora, policy asset from DEX /ap
 `ecx-beta` (eCash Beta · Elements, slot 24), `ecx-mainnet` (eCash · Elements)
 and `elementsplus-regtest` (`regtest` is accepted as a legacy spelling). Public
 profiles pin genesis hash and policy asset in the wallet core and cannot be
-overridden. **`ecx-beta` and `ecx-mainnet` are pending** until their sidechain
-genesis hash, pegged asset and Esplora URL are published: every command that
-needs the chain refuses with an explanatory error instead of guessing. The
+overridden. **`ecx-beta` and `ecx-mainnet` are pending**: beta already pins
+the v11 identity that betanet slot 24 commits to (same genesis and pegged
+asset as the retired alpha chain) but has no public sidechain Esplora yet;
+mainnet has no published pins at all. Every command that needs the chain
+refuses a pending profile with an explanatory error instead of guessing. The
 retired `ecx-alpha` chain is archived and refused.
 
 Regtest needs `genesis_hash` and `policy_asset`; they are auto-discovered on

@@ -1154,6 +1154,27 @@ fn pending_and_archived_profiles_are_refused_by_constructors() {
 }
 
 #[test]
+fn a_published_beta_profile_signs_offers_tagged_ecx_beta() {
+    static PUBLISHED_BETA: network::NetworkProfile = network::NetworkProfile {
+        status: network::ProfileStatus::Live,
+        esplora_url: Some("https://esplora.example/api"),
+        ..ECX_BETA
+    };
+    let beta = WalletCore::for_profile(ALICE, &PUBLISHED_BETA).unwrap();
+    assert_eq!(beta.network_id(), "ecx-beta");
+    let address = beta.derive_address(Branch::External, 0).unwrap();
+    assert!(address.native_address.starts_with("elements1"));
+    assert_eq!(
+        address.native_address,
+        core(ALICE)
+            .derive_address(Branch::External, 0)
+            .unwrap()
+            .native_address,
+        "same v11 identity as the archived alpha chain"
+    );
+}
+
+#[test]
 fn offers_carry_the_profile_id() {
     let (offer, prevout_hex) = signed_offer();
     assert_eq!(offer.network, ECX_ALPHA.id);

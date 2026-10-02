@@ -81,7 +81,7 @@ pub struct NetworkProfile {
 pub enum NetworkProfileError {
     #[error("unknown network profile {0:?}; known profiles: ecx-beta, ecx-mainnet, elementsplus-regtest")]
     Unknown(String),
-    #[error("network profile {0:?} is pending: its sidechain genesis hash, pegged asset and Esplora URL have not been published yet, so this wallet refuses to run on it (see docs/NETWORKS.md)")]
+    #[error("network profile {0:?} is pending: not all of its pins (sidechain genesis, pegged asset, address encoding, sidechain Esplora URL) are published yet, so this wallet refuses to run on it (see docs/NETWORKS.md)")]
     Pending(&'static str),
     #[error("network profile {0:?} is archived (retired chain) and cannot be selected")]
     Archived(&'static str),
@@ -116,17 +116,24 @@ pub const ECX_ALPHA: NetworkProfile = NetworkProfile {
     dex_url: None,
 };
 
-/// Elements sidechain in slot 24 on eCash betanet. Activated at parent height
-/// 970715; sidechain genesis, pegged asset and Esplora are not yet published.
+/// Elements sidechain in slot 24 on eCash betanet (activated at parent height
+/// 970715). The slot-24 proposal bytes equal `PROPOSAL_DESCRIPTION_HEX` in
+/// Elements+ `src/elements_drivechain_identity.h` (master 006d2a30), i.e. the
+/// same v11 identity as the archived alpha chain: same genesis, pegged asset
+/// and address encoding. Pending only because no public sidechain node or
+/// Esplora runs on betanet yet: `esplora_url` is the single missing pin.
 pub const ECX_BETA: NetworkProfile = NetworkProfile {
     id: "ecx-beta",
     display_name: "eCash Beta · Elements",
     status: ProfileStatus::Pending,
     kind: ProfileKind::Public,
     sidechain_slot: 24,
-    genesis_hash: None,
-    policy_asset: None,
-    address: None,
+    genesis_hash: Some(alpha::GENESIS_HASH),
+    policy_asset: Some(alpha::POLICY_ASSET),
+    address: Some(AddressProfile {
+        native: &alpha::NATIVE_ADDRESS_PARAMS,
+        alias: &AddressParams::ELEMENTS,
+    }),
     esplora_url: None,
     l1: L1Profile {
         network_id: "ecash-beta",
@@ -218,6 +225,30 @@ pub struct ResolvedPins {
 }
 
 impl NetworkProfile {
+    /// Pins a public profile still lacks. A profile is buildable only when
+    /// this is empty *and* its status is live.
+    pub fn missing_pins(&self) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        if self.kind == ProfileKind::Public {
+            if self.genesis_hash.is_none() {
+                missing.push("genesis_hash");
+            }
+            if self.policy_asset.is_none() {
+                missing.push("policy_asset");
+            }
+            if self.esplora_url.is_none() {
+                missing.push("esplora_url");
+            }
+            if self.l1.genesis_hash.is_none() {
+                missing.push("l1.genesis_hash");
+            }
+        }
+        if self.address.is_none() {
+            missing.push("address");
+        }
+        missing
+    }
+
     pub fn ensure_selectable(&self) -> Result<(), NetworkProfileError> {
         match self.status {
             ProfileStatus::Live => Ok(()),
@@ -310,14 +341,45 @@ mod tests {
     }
 
     #[test]
-    fn pending_profiles_carry_no_sidechain_pins() {
-        for profile in [&ECX_BETA, &ECX_MAINNET] {
-            assert!(profile.genesis_hash.is_none());
-            assert!(profile.policy_asset.is_none());
-            assert!(profile.esplora_url.is_none());
-            assert!(profile.address.is_none());
+    fn status_matches_missing_pins() {
+        // Invariant: pending <=> something unpublished. Filling the last pin
+        // without flipping the status (or vice versa) fails here.
+        for profile in PROFILES {
+            if profile.status == ProfileStatus::Pending {
+                assert!(!profile.missing_pins().is_empty(), "{}", profile.id);
+            } else {
+                assert!(profile.missing_pins().is_empty(), "{}", profile.id);
+            }
         }
+        // Betanet slot 24 commits to the v11 identity; only Esplora is missing.
+        assert_eq!(ECX_BETA.missing_pins(), ["esplora_url"]);
+        assert_eq!(ECX_BETA.genesis_hash, ECX_ALPHA.genesis_hash);
+        assert_eq!(ECX_BETA.policy_asset, ECX_ALPHA.policy_asset);
         assert_eq!(ECX_BETA.sidechain_slot, 24);
+        assert_eq!(
+            ECX_MAINNET.missing_pins(),
+            [
+                "genesis_hash",
+                "policy_asset",
+                "esplora_url",
+                "l1.genesis_hash",
+                "address"
+            ]
+        );
+    }
+
+    #[test]
+    fn beta_resolves_once_its_esplora_is_published() {
+        static PUBLISHED: NetworkProfile = NetworkProfile {
+            status: ProfileStatus::Live,
+            esplora_url: Some("https://esplora.example/api"),
+            ..ECX_BETA
+        };
+        assert!(PUBLISHED.missing_pins().is_empty());
+        PUBLISHED.ensure_selectable().unwrap();
+        let pins = PUBLISHED.resolve_pins().unwrap();
+        assert_eq!(pins.genesis_hash.to_string(), alpha::GENESIS_HASH);
+        assert_eq!(pins.network, alpha::lwk_network());
     }
 
     #[test]
