@@ -1,5 +1,5 @@
 import type { ExtensionStorageArea } from "../../src/platform/browser.js";
-import { ECX_ALPHA_IDENTITY } from "../../src/network/identity.js";
+import { NETWORK_IDENTITY } from "../../src/network/identity.js";
 
 export class MemoryStorage implements ExtensionStorageArea {
   readonly values: Record<string, unknown> = {};
@@ -15,8 +15,8 @@ export class MemoryStorage implements ExtensionStorageArea {
   }
 }
 
-export const ECX = ECX_ALPHA_IDENTITY.nativeAssetId;
-export const GENESIS = ECX_ALPHA_IDENTITY.genesisHash;
+export const ECX = NETWORK_IDENTITY.nativeAssetId;
+export const GENESIS = NETWORK_IDENTITY.genesisHash;
 export const TOKEN_A = "a".repeat(64);
 export const TOKEN_B = "b".repeat(64);
 export const ADDRESS_1 = "elements1qzyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3jmpdlq";

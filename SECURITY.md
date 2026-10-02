@@ -8,7 +8,8 @@ operator promise observed through multiple relays, not consensus finality. The
 fixed-session limitations are documented in `docs/PRECONFIRMATIONS.md`; do not
 use it with valuable funds before independent review and funded-network tests.
 
-- The ECX Alpha identity pins are compiled into the extension. Explorer data is
+- The selected network profile's identity pins are compiled into the
+  extension (one profile per artifact; pending profiles cannot be built). Explorer data is
   displayed only when its height-zero hash and policy asset match those pins.
   This detects accidental misconfiguration; it does not authenticate a
   compromised explorer or replace header-chain validation by the wallet.

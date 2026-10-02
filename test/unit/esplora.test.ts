@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  EcxAlphaAddressError,
-  EcxAlphaApiError,
-  EcxAlphaEsploraClient,
-  EcxAlphaIdentityError,
-  resolveEcxAlphaAddress,
+  EcxAddressError,
+  EcxApiError,
+  EcxEsploraClient,
+  EcxIdentityError,
+  resolveEcxAddress,
   type FetchImplementation,
-} from "../../src/network/ecx-alpha.js";
-import { ECX_ALPHA_IDENTITY } from "../../src/network/identity.js";
+} from "../../src/network/esplora.js";
+import { NETWORK_IDENTITY } from "../../src/network/identity.js";
 
 type MockBody = string | Readonly<Record<string, unknown>>;
 
@@ -45,9 +45,9 @@ function mockExplorer(routes: Readonly<Record<string, MockRoute>>): {
 
 function identityRoutes(): Record<string, MockRoute> {
   return {
-    "/api/block-height/0": { body: `${ECX_ALPHA_IDENTITY.genesisHash}\n` },
-    [`/api/asset/${ECX_ALPHA_IDENTITY.nativeAssetId}`]: {
-      body: { asset_id: ECX_ALPHA_IDENTITY.nativeAssetId },
+    "/api/block-height/0": { body: `${NETWORK_IDENTITY.genesisHash}\n` },
+    [`/api/asset/${NETWORK_IDENTITY.nativeAssetId}`]: {
+      body: { asset_id: NETWORK_IDENTITY.nativeAssetId },
     },
   };
 }
@@ -55,22 +55,22 @@ function identityRoutes(): Record<string, MockRoute> {
 describe("ECX Alpha explorer identity", () => {
   it("verifies the immutable genesis and policy asset pins", async () => {
     const mock = mockExplorer(identityRoutes());
-    const client = new EcxAlphaEsploraClient({
+    const client = new EcxEsploraClient({
       explorerUrl: "https://explorer.example",
       fetchImpl: mock.fetchImpl,
     });
 
     const identity = await client.verifyIdentity();
 
-    assert.equal(identity.genesisHash, ECX_ALPHA_IDENTITY.genesisHash);
-    assert.equal(identity.policyAssetId, ECX_ALPHA_IDENTITY.nativeAssetId);
+    assert.equal(identity.genesisHash, NETWORK_IDENTITY.genesisHash);
+    assert.equal(identity.policyAssetId, NETWORK_IDENTITY.nativeAssetId);
     assert.equal(identity.explorerApiUrl, "https://explorer.example/api");
     assert(Object.isFrozen(identity));
     assert.deepEqual(
       new Set(mock.calls),
       new Set([
         "/api/block-height/0",
-        `/api/asset/${ECX_ALPHA_IDENTITY.nativeAssetId}`,
+        `/api/asset/${NETWORK_IDENTITY.nativeAssetId}`,
       ]),
     );
   });
@@ -79,33 +79,33 @@ describe("ECX Alpha explorer identity", () => {
     const routes = identityRoutes();
     routes["/api/block-height/0"] = { body: "a".repeat(64) };
     const mock = mockExplorer(routes);
-    const client = new EcxAlphaEsploraClient({ fetchImpl: mock.fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl: mock.fetchImpl });
 
-    await assert.rejects(client.verifyIdentity(), EcxAlphaIdentityError);
+    await assert.rejects(client.verifyIdentity(), EcxIdentityError);
   });
 
   it("fails closed when policy-asset lookup does not identify the pinned asset", async () => {
     const routes = identityRoutes();
-    routes[`/api/asset/${ECX_ALPHA_IDENTITY.nativeAssetId}`] = {
+    routes[`/api/asset/${NETWORK_IDENTITY.nativeAssetId}`] = {
       body: { asset_id: "b".repeat(64) },
     };
     const mock = mockExplorer(routes);
-    const client = new EcxAlphaEsploraClient({ fetchImpl: mock.fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl: mock.fetchImpl });
 
-    await assert.rejects(client.verifyIdentity(), EcxAlphaIdentityError);
+    await assert.rejects(client.verifyIdentity(), EcxIdentityError);
   });
 
   it("does not accept credentials, queries, or non-HTTP explorer URLs", () => {
     assert.throws(
-      () => new EcxAlphaEsploraClient({ explorerUrl: "ftp://explorer.example" }),
+      () => new EcxEsploraClient({ explorerUrl: "ftp://explorer.example" }),
       TypeError,
     );
     assert.throws(
-      () => new EcxAlphaEsploraClient({ explorerUrl: "https://user@example.test" }),
+      () => new EcxEsploraClient({ explorerUrl: "https://user@example.test" }),
       TypeError,
     );
     assert.throws(
-      () => new EcxAlphaEsploraClient({ explorerUrl: "https://example.test/?network=alpha" }),
+      () => new EcxEsploraClient({ explorerUrl: "https://example.test/?network=alpha" }),
       TypeError,
     );
   });
@@ -143,7 +143,7 @@ describe("ECX Alpha live status parsing", () => {
       "/api/fee-estimates": { body: { "6": 0.4, "1": 1.2 } },
     };
     const mock = mockExplorer(routes);
-    const client = new EcxAlphaEsploraClient({ fetchImpl: mock.fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl: mock.fetchImpl });
 
     const status = await client.getNetworkStatus();
 
@@ -165,7 +165,7 @@ describe("ECX Alpha live status parsing", () => {
 
   it("treats an empty fee-estimate response as unavailable rather than fabricating a rate", async () => {
     const mock = mockExplorer({ "/api/fee-estimates": { body: {} } });
-    const client = new EcxAlphaEsploraClient({ fetchImpl: mock.fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl: mock.fetchImpl });
 
     assert.deepEqual(await client.getFeeStatus(), { available: false, estimates: [] });
   });
@@ -176,19 +176,19 @@ describe("ECX Alpha live status parsing", () => {
         body: { count: -1, vsize: 0, total_fee: 0, fee_histogram: [] },
       },
     });
-    const client = new EcxAlphaEsploraClient({ fetchImpl: mock.fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl: mock.fetchImpl });
 
-    await assert.rejects(client.getMempool(), EcxAlphaApiError);
+    await assert.rejects(client.getMempool(), EcxApiError);
   });
 
   it("surfaces HTTP status without incorporating an untrusted response body", async () => {
     const mock = mockExplorer({
       "/api/fee-estimates": { body: "server secret", status: 503 },
     });
-    const client = new EcxAlphaEsploraClient({ fetchImpl: mock.fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl: mock.fetchImpl });
 
     await assert.rejects(client.getFeeStatus(), (error: unknown) => {
-      assert(error instanceof EcxAlphaApiError);
+      assert(error instanceof EcxApiError);
       assert.equal(error.status, 503);
       assert(!error.message.includes("server secret"));
       return true;
@@ -207,7 +207,7 @@ describe("ECX Alpha live status parsing", () => {
       });
       return new Response(stream, { status: 200 });
     };
-    const client = new EcxAlphaEsploraClient({ fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl });
 
     await assert.rejects(client.getFeeStatus(), /exceeds the 1 MiB limit/u);
   });
@@ -218,7 +218,7 @@ describe("ECX Alpha live status parsing", () => {
         status: 200,
         headers: { "Content-Length": String(1024 * 1024 + 1) },
       });
-    const client = new EcxAlphaEsploraClient({ fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl });
 
     await assert.rejects(client.getFeeStatus(), /exceeds the 1 MiB limit/u);
   });
@@ -230,7 +230,7 @@ describe("ECX Alpha live status parsing", () => {
           once: true,
         });
       });
-    const client = new EcxAlphaEsploraClient({ fetchImpl, requestTimeoutMs: 10 });
+    const client = new EcxEsploraClient({ fetchImpl, requestTimeoutMs: 10 });
 
     await assert.rejects(client.getFeeStatus(), /timed out/u);
   });
@@ -245,8 +245,8 @@ describe("canonical and LWK-alias address support", () => {
     "elementsl1pqwp9ze75659cn5ad0hw25nt2kv7j882gudn636hnh4qvjcmjh6jq5ca0d4cgl009m5rn5w0n3k2cqa3ths2qf7s8q6x2xplwgvlfhg0ag5kxszmzfcmc";
 
   it("re-encodes unconfidential aliases with a new checksum", () => {
-    const resolvedAlias = resolveEcxAlphaAddress(alias);
-    const resolvedCanonical = resolveEcxAlphaAddress(canonical);
+    const resolvedAlias = resolveEcxAddress(alias);
+    const resolvedCanonical = resolveEcxAddress(canonical);
 
     assert.equal(resolvedAlias.canonical, canonical);
     assert.equal(resolvedAlias.alias, alias);
@@ -258,8 +258,8 @@ describe("canonical and LWK-alias address support", () => {
   });
 
   it("re-encodes Blech32m confidential aliases with the 12-symbol checksum", () => {
-    const resolvedAlias = resolveEcxAlphaAddress(confidentialAlias);
-    const resolvedCanonical = resolveEcxAlphaAddress(confidentialCanonical);
+    const resolvedAlias = resolveEcxAddress(confidentialAlias);
+    const resolvedCanonical = resolveEcxAddress(confidentialCanonical);
 
     assert.equal(resolvedAlias.canonical, confidentialCanonical);
     assert.equal(resolvedCanonical.alias, confidentialAlias);
@@ -269,10 +269,10 @@ describe("canonical and LWK-alias address support", () => {
   });
 
   it("rejects wrong checksums and unrelated networks", () => {
-    assert.throws(() => resolveEcxAlphaAddress(`${alias.slice(0, -1)}q`), EcxAlphaAddressError);
+    assert.throws(() => resolveEcxAddress(`${alias.slice(0, -1)}q`), EcxAddressError);
     assert.throws(
-      () => resolveEcxAlphaAddress("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"),
-      EcxAlphaAddressError,
+      () => resolveEcxAddress("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"),
+      EcxAddressError,
     );
   });
 
@@ -287,7 +287,7 @@ describe("canonical and LWK-alias address support", () => {
         },
       },
     });
-    const client = new EcxAlphaEsploraClient({ fetchImpl: mock.fetchImpl });
+    const client = new EcxEsploraClient({ fetchImpl: mock.fetchImpl });
 
     const summary = await client.getAddressSummary(alias);
 

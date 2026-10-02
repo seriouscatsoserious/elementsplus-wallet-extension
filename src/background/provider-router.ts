@@ -4,7 +4,7 @@
  * from the page payload. Approvals happen in a separate extension window.
  */
 import type { WalletSnapshot } from "../adapters/elementsplus-wasm.js";
-import type { EcxAlphaIdentity } from "../network/identity.js";
+import type { NetworkIdentity } from "../network/identity.js";
 import { hasExactKeys, isPlainRecord, ValidationError } from "../shared/validation.js";
 import { unrefTimer, type ApprovalResult, type ApprovalView } from "./controller.js";
 import { validateOperation, type WalletOperation } from "./operations.js";
@@ -48,7 +48,7 @@ export interface RouterPermissions {
 export interface RouterDependencies {
   readonly controller: RouterController;
   readonly permissions: RouterPermissions;
-  readonly identity: EcxAlphaIdentity;
+  readonly identity: NetworkIdentity;
   /** Open `approve.html?id=<requestId>`; resolves to a window id when known. */
   readonly openApproval: (requestId: string) => Promise<number | undefined>;
   readonly closeWindow?: (windowId: number) => void;

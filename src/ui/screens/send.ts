@@ -1,6 +1,7 @@
+import { NETWORK_IDENTITY } from "../../network/identity.js";
 /** Send → Confirm → Sent. */
 import type { ApprovalResult } from "../../background/controller.js";
-import { resolveEcxAlphaAddress } from "../../network/ecx-alpha.js";
+import { resolveEcxAddress } from "../../network/esplora.js";
 import {
   AmountError,
   atomicToDecimalInput,
@@ -47,7 +48,7 @@ export function sendScreen(app: App, params: ScreenParams): HTMLElement {
 
   const to = h("input", {
     class: "field mono",
-    placeholder: `${app.status?.network.name ?? "ECX Alpha"} address`,
+    placeholder: `${app.status?.network.name ?? NETWORK_IDENTITY.displayName} address`,
     autocomplete: "off",
     spellcheck: "false",
     "aria-label": "Recipient address",
@@ -115,11 +116,11 @@ export function sendScreen(app: App, params: ScreenParams): HTMLElement {
     showError(error, null);
     let recipient: string;
     try {
-      const resolved = resolveEcxAlphaAddress(to.value.trim());
+      const resolved = resolveEcxAddress(to.value.trim());
       if (resolved.confidential) throw new Error("confidential");
       recipient = resolved.canonical;
     } catch {
-      showError(error, `Enter a valid ${app.status?.network.name ?? "ECX Alpha"} address`);
+      showError(error, `Enter a valid ${app.status?.network.name ?? NETWORK_IDENTITY.displayName} address`);
       to.focus();
       return;
     }
@@ -226,7 +227,7 @@ export function confirmScreen(app: App): HTMLElement {
       ),
       h("dl", { class: "card m0" },
         kv("To", h("span", { class: "mono addr-full" }, output?.address ?? "")),
-        kv("Network", app.status?.network.name ?? "ECX Alpha"),
+        kv("Network", app.status?.network.name ?? NETWORK_IDENTITY.displayName),
         kv("Network fee", amountWithSymbol(view.review.fee, nativeToken)),
         kv(h("strong", { class: "fg" }, "Total"), h("strong", null, total)),
       ),

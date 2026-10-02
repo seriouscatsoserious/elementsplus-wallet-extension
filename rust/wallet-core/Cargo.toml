@@ -3,7 +3,7 @@ name = "elementsplus-wallet-core"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Minimal fail-closed ECX Alpha browser-wallet signing core"
+description = "Minimal fail-closed Elements+ (eCash Elements sidechain) wallet signing core"
 publish = false
 
 [lib]

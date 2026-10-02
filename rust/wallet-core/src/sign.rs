@@ -10,7 +10,7 @@ use lwk_common::Signer;
 
 use crate::offer::{explicit_parts, verify_p2wpkh_witness, Offer, OfferLeg};
 use crate::review::{InputOwner, PreparedTx, SignedResult, TxKind};
-use crate::{WalletCore, WalletError, MAX_RAW_TRANSACTION_BYTES, OFFER_NETWORK, OFFER_VERSION};
+use crate::{WalletCore, WalletError, MAX_RAW_TRANSACTION_BYTES, OFFER_VERSION};
 
 impl WalletCore {
     /// Recompute all review facts, require explicit approval of the exact PSET
@@ -118,7 +118,7 @@ impl WalletCore {
                 raw_tx_hex: None,
                 offer: Some(Offer {
                     version: OFFER_VERSION,
-                    network: OFFER_NETWORK.into(),
+                    network: self.network_id.clone(),
                     genesis_hash: self.genesis_hash.to_string(),
                     tx: hex::encode(raw),
                     give: OfferLeg {

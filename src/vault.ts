@@ -1,5 +1,5 @@
 import type { ExtensionStorageArea } from "./platform/browser.js";
-import { ECX_ALPHA_IDENTITY } from "./network/identity.js";
+import { NETWORK_IDENTITY } from "./network/identity.js";
 import { base64ToBytes, bytesToBase64 } from "./shared/base64.js";
 import { hasExactKeys, isPlainRecord, normalizeMnemonic, requireString, ValidationError } from "./shared/validation.js";
 
@@ -20,8 +20,8 @@ export interface WalletVaultPayload {
   readonly walletId: string;
   readonly mnemonic: string;
   readonly createdAt: string;
-  readonly networkKey: typeof ECX_ALPHA_IDENTITY.key;
-  readonly genesisHash: typeof ECX_ALPHA_IDENTITY.genesisHash;
+  readonly networkKey: typeof NETWORK_IDENTITY.key;
+  readonly genesisHash: typeof NETWORK_IDENTITY.genesisHash;
   readonly explicitOutputsOnly: true;
 }
 
@@ -67,7 +67,7 @@ async function deriveWrappingKey(provider: Crypto, password: string, salt: Crypt
 }
 
 function associatedData(purpose: "wrapped-key" | "payload"): CryptoBytes {
-  return encoder.encode(`${VAULT_SCHEME}:${ECX_ALPHA_IDENTITY.genesisHash}:${purpose}`);
+  return encoder.encode(`${VAULT_SCHEME}:${NETWORK_IDENTITY.genesisHash}:${purpose}`);
 }
 
 function decodeExact(value: string, field: string, length: number): CryptoBytes {
@@ -84,8 +84,8 @@ export function validateVaultPayload(value: unknown): WalletVaultPayload {
     !isPlainRecord(value)
     || !hasExactKeys(value, ["schemaVersion", "walletId", "mnemonic", "createdAt", "networkKey", "genesisHash", "explicitOutputsOnly"])
     || value["schemaVersion"] !== 1
-    || value["networkKey"] !== ECX_ALPHA_IDENTITY.key
-    || value["genesisHash"] !== ECX_ALPHA_IDENTITY.genesisHash
+    || value["networkKey"] !== NETWORK_IDENTITY.key
+    || value["genesisHash"] !== NETWORK_IDENTITY.genesisHash
     || value["explicitOutputsOnly"] !== true
   ) throw new ValidationError("vault payload identity is malformed or unsupported");
   const walletId = requireString(value["walletId"], "walletId", 64);
@@ -99,8 +99,8 @@ export function validateVaultPayload(value: unknown): WalletVaultPayload {
     walletId,
     mnemonic: normalizeMnemonic(requireString(value["mnemonic"], "mnemonic", 512)),
     createdAt,
-    networkKey: ECX_ALPHA_IDENTITY.key,
-    genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
+    networkKey: NETWORK_IDENTITY.key,
+    genesisHash: NETWORK_IDENTITY.genesisHash,
     explicitOutputsOnly: true,
   };
 }

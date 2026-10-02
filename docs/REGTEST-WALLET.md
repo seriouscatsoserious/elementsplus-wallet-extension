@@ -5,9 +5,12 @@ RPC-to-Esplora bridge, two receipt relays, the preconfer signer, and a visibly
 labelled Chromium wallet build. Everything binds to loopback. It uses disposable
 regtest coins and must never receive a real recovery phrase or valuable funds.
 
-The production extension remains pinned to ECX Alpha. Regtest support exists
-only in `.regtest/dist/chromium`, whose manifest, network identity and WASM are
-generated separately and labelled `LOCAL REGTEST`.
+Public artifacts are pinned to their network profile (`docs/NETWORKS.md`).
+Regtest support exists only in the `elementsplus-regtest` artifact at
+`.regtest/dist/chromium`, whose manifest, network identity and WASM are
+generated separately, labelled *Elements+ local regtest* and described as
+DISPOSABLE. Its offers carry `"network": "elementsplus-regtest"`, so run the
+DEX server with `NETWORK_NAME=elementsplus-regtest`.
 
 ## Server
 
@@ -85,7 +88,7 @@ scp -r helsinki:/home/codexhost/elementsplus-wallet-test/.regtest/dist/chromium 
 
 Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**,
 and select `elementsplus-regtest-extension`. Confirm that its name contains
-`LOCAL REGTEST`. Record the 32-letter extension ID shown by Chromium.
+`Elements+ local regtest`. Record the 32-letter extension ID shown by Chromium.
 
 Create a brand-new disposable wallet in the extension, unlock it, and copy its
 `ert1...` receive address. Never import an existing phrase.

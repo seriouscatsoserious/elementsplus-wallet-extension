@@ -12,18 +12,37 @@ use elements::{
     AssetId, EcdsaSighashType, OutPoint, Script, Sequence, Transaction, TxIn, TxOut, Txid,
 };
 use elementsplus_wallet_core::issuance::issuance_ids;
+use elementsplus_wallet_core::network::{self, ECX_ALPHA, ECX_BETA, ECX_MAINNET};
 use elementsplus_wallet_core::{
-    decode_offer, verify_asset_issuance, verify_raw_transaction, AssetContract,
+    decode_offer_for_profile, verify_asset_issuance, verify_raw_transaction, AssetContract,
     AssetIssuanceVerificationRequest, Branch, CancelRequest, ExpectedWalletOutput, IssuanceRequest,
     Offer, OfferSplitRequest, PreparedTx, RawTransactionVerificationRequest, SwapOfferRequest,
     TakeOfferInput, TakeSwapOffersRequest, TransferRequest, TxKind, VerifiedUtxo, WalletCore,
-    WalletError, MAX_MONEY, POLICY_ASSET,
+    WalletError, MAX_MONEY,
 };
 
 // Public BIP39 test vectors only. Never use either mnemonic for real funds.
 const ALICE: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const BOB: &str = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+
+// These offline vectors were recorded against the retired ECX Alpha chain and
+// run on its archived profile; live builds never select it.
+const POLICY_ASSET: &str = match ECX_ALPHA.policy_asset {
+    Some(asset) => asset,
+    None => panic!("archived ECX Alpha profile lost its policy asset"),
+};
+
+fn core(mnemonic: &str) -> WalletCore {
+    WalletCore::for_archived_profile(mnemonic, &ECX_ALPHA).unwrap()
+}
+
+fn decode_offer(
+    offer_json: &str,
+    prevout_raw_tx_hex: &str,
+) -> Result<elementsplus_wallet_core::DecodedOffer, WalletError> {
+    decode_offer_for_profile(&ECX_ALPHA, offer_json, prevout_raw_tx_hex)
+}
 
 fn policy() -> AssetId {
     AssetId::from_str(POLICY_ASSET).unwrap()
@@ -121,8 +140,8 @@ fn contract() -> AssetContract {
 }
 
 fn transfer_fixture() -> (WalletCore, PreparedTx) {
-    let alice = WalletCore::new(ALICE).unwrap();
-    let bob = WalletCore::new(BOB).unwrap();
+    let alice = core(ALICE);
+    let bob = core(BOB);
     let recipient = bob.derive_address(Branch::External, 7).unwrap();
     let request = TransferRequest {
         recipient: recipient.lwk_alias,
@@ -196,8 +215,8 @@ fn policy_transfer_prepare_review_sign_verify() {
 
 #[test]
 fn fee_rate_scales_the_fee() {
-    let alice = WalletCore::new(ALICE).unwrap();
-    let bob = WalletCore::new(BOB).unwrap();
+    let alice = core(ALICE);
+    let bob = core(BOB);
     let recipient = bob
         .derive_address(Branch::External, 0)
         .unwrap()
@@ -229,8 +248,8 @@ fn fee_rate_scales_the_fee() {
 
 #[test]
 fn asset_transfer_uses_asset_and_policy_inputs() {
-    let alice = WalletCore::new(ALICE).unwrap();
-    let bob = WalletCore::new(BOB).unwrap();
+    let alice = core(ALICE);
+    let bob = core(BOB);
     let request = TransferRequest {
         recipient: bob
             .derive_address(Branch::External, 1)
@@ -336,7 +355,7 @@ fn changed_pset_and_summary_still_need_new_approval() {
 #[test]
 fn foreign_output_disguised_as_change_is_external() {
     let (alice, prepared) = transfer_fixture();
-    let bob = WalletCore::new(BOB).unwrap();
+    let bob = core(BOB);
     let thief = bob.derive_address(Branch::Change, 3).unwrap();
     let mut pset = pset_of(&prepared);
     // Keep Alice's bip32 derivation on the change output but redirect it.
@@ -402,7 +421,7 @@ fn foreign_inputs_outside_swap_take_are_rejected() {
         Err(WalletError::InvalidPset(_))
     ));
     // A derivation from another wallet is refused outright.
-    let bob = WalletCore::new(BOB).unwrap();
+    let bob = core(BOB);
     assert!(matches!(
         bob.review_pset(&prepared.pset_base64, TxKind::Transfer),
         Err(WalletError::InvalidPset(_))
@@ -411,8 +430,8 @@ fn foreign_inputs_outside_swap_take_are_rejected() {
 
 #[test]
 fn foreign_script_duplicates_and_overflow_are_rejected() {
-    let alice = WalletCore::new(ALICE).unwrap();
-    let bob = WalletCore::new(BOB).unwrap();
+    let alice = core(ALICE);
+    let bob = core(BOB);
     let recipient = bob.derive_address(Branch::External, 0).unwrap();
 
     let mut foreign = fund(&alice, 0x44, policy(), 2_000, Branch::External, 0).0;
@@ -467,7 +486,7 @@ fn foreign_script_duplicates_and_overflow_are_rejected() {
 
 #[test]
 fn recipient_must_be_unconfidential_p2wpkh() {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let mut request = TransferRequest {
         recipient: alice
             .derive_address(Branch::External, 0)
@@ -493,7 +512,7 @@ fn recipient_must_be_unconfidential_p2wpkh() {
 
 #[test]
 fn issuance_prepare_sign_and_verify_contract() {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let (utxo, _) = fund(&alice, 0x10, policy(), 200_000, Branch::External, 0);
     let request = IssuanceRequest {
         contract: contract(),
@@ -567,7 +586,7 @@ fn issuance_prepare_sign_and_verify_contract() {
 
 #[test]
 fn issuance_without_token_and_contract_validation() {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let mut request = IssuanceRequest {
         contract: contract(),
         amount: 5,
@@ -637,7 +656,7 @@ fn issuance_without_token_and_contract_validation() {
 
 #[test]
 fn issuance_tampering_is_rejected() {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let request = IssuanceRequest {
         contract: contract(),
         amount: 1_000,
@@ -662,7 +681,7 @@ fn issuance_tampering_is_rejected() {
 
 #[test]
 fn offer_split_is_a_self_send() {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let request = OfferSplitRequest {
         asset_id: token().to_string(),
         amount: 250,
@@ -689,7 +708,7 @@ fn offer_split_is_a_self_send() {
 
 /// Alice offers 500 tokens for 30 000 policy units.
 fn offer_fixture() -> (WalletCore, PreparedTx, String) {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let (utxo, prevout_hex) = fund(&alice, 0x70, token(), 500, Branch::External, 2);
     let prepared = alice
         .prepare_swap_offer(&SwapOfferRequest {
@@ -758,7 +777,7 @@ fn swap_offer_is_signed_single_anyonecanpay() {
 
 #[test]
 fn swap_offer_request_validation() {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let (utxo, _) = fund(&alice, 0x71, token(), 500, Branch::External, 2);
     let mut request = SwapOfferRequest {
         utxo,
@@ -822,7 +841,7 @@ fn tampered_offers_are_rejected() {
     ));
 
     // Prevout transaction that does not hash to the offered txid.
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let (_, other_prevout) = fund(&alice, 0x99, token(), 500, Branch::External, 2);
     assert!(matches!(
         check(&offer, &other_prevout),
@@ -848,7 +867,7 @@ fn tampered_offers_are_rejected() {
 
 fn take_fixture() -> (WalletCore, PreparedTx, Offer) {
     let (offer, prevout_hex) = signed_offer();
-    let bob = WalletCore::new(BOB).unwrap();
+    let bob = core(BOB);
     let request = TakeSwapOffersRequest {
         offers: vec![TakeOfferInput {
             offer: elementsplus_wallet_core::OfferInput::Object(offer.clone()),
@@ -917,7 +936,7 @@ fn take_with_tampered_maker_witness_is_rejected() {
 #[test]
 fn take_rejects_duplicates_and_wrong_prevout() {
     let (offer, prevout_hex) = signed_offer();
-    let bob = WalletCore::new(BOB).unwrap();
+    let bob = core(BOB);
     let entry = TakeOfferInput {
         offer: elementsplus_wallet_core::OfferInput::Object(offer.clone()),
         prevout_raw_tx_hex: prevout_hex.clone(),
@@ -933,7 +952,7 @@ fn take_rejects_duplicates_and_wrong_prevout() {
         bob.take_swap_offers(&request),
         Err(WalletError::Offer(_))
     ));
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let (_, wrong_prevout) = fund(&alice, 0x98, token(), 500, Branch::External, 2);
     request.offers = vec![TakeOfferInput {
         prevout_raw_tx_hex: wrong_prevout,
@@ -963,7 +982,7 @@ fn take_rejects_duplicates_and_wrong_prevout() {
 
 #[test]
 fn take_multiple_offers_pairs_indices() {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let mut entries = Vec::new();
     for (salt, give, want) in [(0x90u8, 100u64, 7_000u64), (0x91, 200, 11_000)] {
         let (utxo, prevout_hex) = fund(&alice, salt, token(), give, Branch::External, 1);
@@ -985,7 +1004,7 @@ fn take_multiple_offers_pairs_indices() {
             prevout_raw_tx_hex: prevout_hex,
         });
     }
-    let bob = WalletCore::new(BOB).unwrap();
+    let bob = core(BOB);
     let prepared = bob
         .take_swap_offers(&TakeSwapOffersRequest {
             offers: entries,
@@ -1009,7 +1028,7 @@ fn take_multiple_offers_pairs_indices() {
 
 #[test]
 fn cancel_returns_offered_utxo_to_wallet() {
-    let alice = WalletCore::new(ALICE).unwrap();
+    let alice = core(ALICE);
     let (offered, _) = fund(&alice, 0x70, token(), 500, Branch::External, 2);
     let request = CancelRequest {
         utxo: offered.clone(),
@@ -1109,4 +1128,58 @@ fn raw_transaction_verifier_matches_txid_script_and_explicit_values() {
     request.expected_wallet_outputs[0].script_pub_key_hex =
         hex::encode(recipient_script.as_bytes());
     assert!(verify_raw_transaction(&request).is_err());
+}
+
+#[test]
+fn pending_and_archived_profiles_are_refused_by_constructors() {
+    for profile in [&ECX_BETA, &ECX_MAINNET] {
+        let error = WalletCore::for_profile(ALICE, profile).err().unwrap();
+        assert!(
+            matches!(
+                error,
+                WalletError::Network(network::NetworkProfileError::Pending(_))
+            ),
+            "{error}"
+        );
+        assert!(error.to_string().contains("pending"));
+        assert!(decode_offer_for_profile(profile, "{}", "00").is_err());
+    }
+    assert!(matches!(
+        WalletCore::for_profile(ALICE, &ECX_ALPHA),
+        Err(WalletError::Network(
+            network::NetworkProfileError::Archived(_)
+        ))
+    ));
+    assert!(WalletCore::for_archived_profile(ALICE, &ECX_BETA).is_err());
+}
+
+#[test]
+fn a_published_beta_profile_signs_offers_tagged_ecx_beta() {
+    static PUBLISHED_BETA: network::NetworkProfile = network::NetworkProfile {
+        status: network::ProfileStatus::Live,
+        esplora_url: Some("https://esplora.example/api"),
+        ..ECX_BETA
+    };
+    let beta = WalletCore::for_profile(ALICE, &PUBLISHED_BETA).unwrap();
+    assert_eq!(beta.network_id(), "ecx-beta");
+    let address = beta.derive_address(Branch::External, 0).unwrap();
+    assert!(address.native_address.starts_with("elements1"));
+    assert_eq!(
+        address.native_address,
+        core(ALICE)
+            .derive_address(Branch::External, 0)
+            .unwrap()
+            .native_address,
+        "same v11 identity as the archived alpha chain"
+    );
+}
+
+#[test]
+fn offers_carry_the_profile_id() {
+    let (offer, prevout_hex) = signed_offer();
+    assert_eq!(offer.network, ECX_ALPHA.id);
+    // Same genesis, different profile id: rejected.
+    let mut renamed = offer.clone();
+    renamed.network = "ecx-beta".into();
+    assert!(decode_offer(&serde_json::to_string(&renamed).unwrap(), &prevout_hex).is_err());
 }

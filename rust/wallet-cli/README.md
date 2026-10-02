@@ -1,6 +1,6 @@
 # epw — headless Elements+ wallet (CLI + MCP)
 
-`epw` is a headless, agent-friendly wallet for ECX Alpha (Elements+, explicit
+`epw` is a headless, agent-friendly wallet for the Elements+ eCash sidechain (explicit
 outputs only), spec `docs/V2-SPEC.md` §6.2. It uses the same signing core as
 the browser extension (`rust/wallet-core`): every transaction is built by the
 core, its review is recomputed from the PSET, and signing is bound to the
@@ -28,13 +28,24 @@ mnemonic except on `init`; no MCP tool can read it.
 
 ```sh
 epw config get
-epw config set network regtest                 # or ecx-alpha (default; chain identity pinned)
-epw config set esplora_url http://127.0.0.1:43199/api
-epw config set dex_url http://127.0.0.1:8790
+epw config set network elementsplus-regtest    # or ecx-beta (default) / ecx-mainnet
+epw config set esplora_url http://127.0.0.1:43199/api   # default: the profile's
+epw config set dex_url http://127.0.0.1:8790            # default: the profile's
 epw config set registry_url https://…/api/assets   # default <dex_url>/api/assets
 epw config set fee_rate 1                       # sat/vB; gap_limit (20) too
 epw config discover   # regtest: genesis from Esplora, policy asset from DEX /api/health
 ```
+
+`network` is a profile id from the shared registry (`docs/NETWORKS.md`):
+`ecx-beta` (eCash Beta · Elements, slot 24), `ecx-mainnet` (eCash · Elements)
+and `elementsplus-regtest` (`regtest` is accepted as a legacy spelling). Public
+profiles pin genesis hash and policy asset in the wallet core and cannot be
+overridden. **`ecx-beta` and `ecx-mainnet` are pending**: beta already pins
+the v11 identity that betanet slot 24 commits to (same genesis and pegged
+asset as the retired alpha chain) but has no public sidechain Esplora yet;
+mainnet has no published pins at all. Every command that needs the chain
+refuses a pending profile with an explanatory error instead of guessing. The
+retired `ecx-alpha` chain is archived and refused.
 
 Regtest needs `genesis_hash` and `policy_asset`; they are auto-discovered on
 first use if missing (the DEX genesis must match the explorer's).
@@ -206,5 +217,6 @@ EPW_TEST_DEX=http://127.0.0.1:8791 EPW_TEST_DIR=/tmp/epw-itest \
 cargo test --test funded_regtest -- --ignored --test-threads=1 --nocapture
 ```
 
-The wallet core always emits offers with `"network": "ecx-alpha"` (also on
-regtest), so the DEX must run with the default `NETWORK_NAME`.
+Offers carry the wallet's profile id as `"network"` (`elementsplus-regtest`
+here), so the DEX server must run with `NETWORK_NAME=elementsplus-regtest`
+(its default is still `ecx-alpha`).

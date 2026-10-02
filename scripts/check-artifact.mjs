@@ -2,12 +2,20 @@ import { createHash } from "node:crypto";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
+import { profileArgument, refuseUnselectable } from "./profile-args.mjs";
+import { toWalletBuildProfile } from "../src/network/profiles.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Checks the artifact built for exactly one network profile.
+const profile = refuseUnselectable(profileArgument(process.argv.slice(2)));
+const regtest = profile.kind === "local-regtest";
+const artifactRoot = path.join(root, regtest ? ".regtest/dist" : "dist");
+const targets = regtest ? ["chromium"] : ["chromium", "firefox"];
 const required = [
   "manifest.json",
   "src/background/service-worker.js",
-  "src/network/ecx-alpha.js",
+  "src/network/esplora.js",
   "src/wasm/elementsplus_wallet_core.js",
   "src/wasm/elementsplus_wallet_core_bg.wasm",
   "src/ui/wallet.html",
@@ -31,7 +39,6 @@ const expectedContentScripts = [{
   all_frames: false,
 }];
 const expectedWebAccessible = [{ resources: ["src/content/inpage.js"], matches: pageMatches }];
-const expectedHosts = ["https://explorer.bitnames.info/*"];
 const allowedExtensions = new Set([".css", ".html", ".js", ".json", ".wasm", ".woff2", ".txt"]);
 const maximumArtifactBytes = 12 * 1024 * 1024;
 const forbiddenSource = [
@@ -55,13 +62,27 @@ async function listFiles(directory) {
 }
 
 const walletCoreDigests = [];
-for (const target of ["chromium", "firefox"]) {
-  const directory = path.join(root, "dist", target);
+for (const target of targets) {
+  const directory = path.join(artifactRoot, target);
   for (const relative of required) {
     const file = path.join(directory, relative);
     if (!(await stat(file)).isFile()) throw new Error(`Missing artifact: ${target}/${relative}`);
   }
+  const { BUILD_NETWORK_PROFILE: compiled } = await import(
+    `${pathToFileURL(path.join(directory, "src", "network", "build-profile.js")).href}?${target}`
+  );
+  if (compiled?.id !== profile.id || !Object.isFrozen(compiled)) {
+    throw new Error(`${target} artifact is compiled for ${compiled?.id}, not ${profile.id}`);
+  }
+  if (!regtest && !isDeepStrictEqual({ ...compiled }, { ...toWalletBuildProfile(profile) })) {
+    throw new Error(`${target} compiled identity differs from the ${profile.id} registry pins`);
+  }
+  const explorerOrigin = new URL(compiled.explorerUrl).origin;
+  const expectedHosts = [`${explorerOrigin}/*`];
   const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
+  if (manifest.name !== `Elements+ Wallet — ${compiled.displayName}` || JSON.stringify(manifest).includes("{{")) {
+    throw new Error(`${target} manifest is not labelled for ${compiled.displayName}`);
+  }
   if (manifest.manifest_version !== 3 || manifest.permissions.join(",") !== "storage") {
     throw new Error(`${target} manifest has an unexpected permission surface`);
   }
@@ -69,7 +90,7 @@ for (const target of ["chromium", "firefox"]) {
     throw new Error(`${target} must open the reviewed wallet surface directly`);
   }
   if (JSON.stringify(manifest.host_permissions) !== JSON.stringify(expectedHosts)) {
-    throw new Error(`${target} manifest must grant only the pinned explorer host`);
+    throw new Error(`${target} manifest must grant only the profile's explorer host`);
   }
   if ("optional_host_permissions" in manifest || "externally_connectable" in manifest) {
     throw new Error(`${target} manifest exposes an unexpected extension boundary`);
@@ -93,7 +114,7 @@ for (const target of ["chromium", "firefox"]) {
     typeof csp !== "string"
     || !csp.includes("default-src 'none'")
     || !csp.includes("script-src 'self' 'wasm-unsafe-eval'")
-    || !csp.includes("connect-src https://explorer.bitnames.info")
+    || !csp.includes(`connect-src ${explorerOrigin} `)
     || !csp.includes("font-src 'self'")
     || /\b(?:ws|wss):/u.test(csp)
     || csp.includes("'unsafe-inline'")
@@ -128,8 +149,11 @@ for (const target of ["chromium", "firefox"]) {
   if ("verify_preconfirmation_receipt" in bindings) {
     throw new Error(`${target} wallet core still exposes preconfirmation verification`);
   }
-  if (typeof bindings.WasmWalletCore.forRegtest !== "undefined") {
-    throw new Error(`${target} production artifact exposes the test-only network constructor`);
+  if (bindings.network_profile_id() !== profile.id) {
+    throw new Error(`${target} wallet core was compiled for ${bindings.network_profile_id()}, not ${profile.id}`);
+  }
+  if (regtest !== (typeof bindings.WasmWalletCore.forRegtest === "function")) {
+    throw new Error(`${target} artifact ${regtest ? "lacks" : "exposes"} the test-only network constructor`);
   }
   const publicTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   if (!bindings.validate_mnemonic(publicTestMnemonic)) {
@@ -141,7 +165,22 @@ for (const target of ["chromium", "firefox"]) {
     || generatedMnemonic.split(" ").length !== 12
   ) throw new Error(`${target} packaged wallet core mnemonic generation failed`);
   generatedMnemonic = "";
-  const core = new bindings.WasmWalletCore(publicTestMnemonic);
+  let core;
+  if (regtest) {
+    // The regtest core has no compiled pins; the plain constructor must refuse.
+    let refused = false;
+    try {
+      new bindings.WasmWalletCore(publicTestMnemonic).free();
+    } catch {
+      refused = true;
+    }
+    if (!refused) throw new Error(`${target} regtest core accepted the compiled-profile constructor`);
+    core = bindings.WasmWalletCore.forRegtest(
+      publicTestMnemonic, compiled.genesisHash, compiled.nativeAssetId, compiled.displayName,
+    );
+  } else {
+    core = new bindings.WasmWalletCore(publicTestMnemonic);
+  }
   try {
     const derived = JSON.parse(core.derive_address_json("external", 0));
     const recipient = JSON.parse(core.derive_address_json("external", 1));
@@ -149,11 +188,11 @@ for (const target of ["chromium", "firefox"]) {
       derived.branch !== "external"
       || derived.index !== 0
       || typeof derived.native_address !== "string"
-      || !derived.native_address.startsWith("elements1")
+      || !derived.native_address.startsWith(`${compiled.bech32Hrp}1`)
     ) throw new Error(`${target} packaged wallet core derivation smoke test failed`);
     const prepared = JSON.parse(core.prepare_transfer_json(JSON.stringify({
       recipient: recipient.native_address,
-      asset_id: "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4",
+      asset_id: compiled.nativeAssetId,
       amount: "1000",
       fee_rate: 1,
       change_index: 0,
@@ -161,7 +200,7 @@ for (const target of ["chromium", "firefox"]) {
         txid: "1".repeat(64),
         vout: 0,
         value: "10000",
-        asset_id: "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4",
+        asset_id: compiled.nativeAssetId,
         script_pubkey_hex: derived.script_pubkey_hex,
         branch: "external",
         index: 0,
@@ -188,7 +227,7 @@ for (const target of ["chromium", "firefox"]) {
     })));
     if (
       verified.txid !== signed.txid
-      || verified.outputs?.[0]?.assetId !== "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4"
+      || verified.outputs?.[0]?.assetId !== compiled.nativeAssetId
       || verified.outputs?.[0]?.valueAtomic !== 1_000
     ) throw new Error(`${target} packaged wallet core raw-transaction verification failed`);
   } finally {
@@ -221,4 +260,4 @@ if (new Set(walletCoreDigests).size !== 1) {
   throw new Error("Chromium and Firefox packages contain different wallet core WASM bytes");
 }
 
-process.stdout.write("Artifact policy checks passed\n");
+process.stdout.write(`Artifact policy checks passed for ${profile.id} (${targets.join(", ")})\n`);

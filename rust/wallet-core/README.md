@@ -1,12 +1,19 @@
 # Elements+ wallet core
 
-This crate is the **offline signing core** for the ECX Alpha browser wallet
-(spec: `docs/V2-SPEC.md` §1–§2). It pins the audited LWK revision and ECX chain
-identity through `elementsplus-lwk-adapter`.
+This crate is the **offline signing core** for the Elements+ browser wallet
+and `epw` (spec: `docs/V2-SPEC.md` §1–§2). It pins the audited LWK revision
+through `elementsplus-lwk-adapter` and takes chain identity from the typed
+profile registry in `src/network.rs` (`ecx-beta`, `ecx-mainnet`,
+`elementsplus-regtest`; archived `ecx-alpha` for historical vectors only; see
+`docs/NETWORKS.md`). `WalletCore::for_profile` refuses pending profiles whose
+sidechain pins are not yet published. The WASM constructor uses only the
+profile compiled in via `ELEMENTSPLUS_NETWORK_PROFILE` (set by
+`scripts/build-wasm.mjs`); the regtest build adds `forRegtest`.
 
 - BIP39 English 12-word mnemonic;
 - `m/84'/1'/0'/0/index` receive and `m/84'/1'/0'/1/index` change paths;
-- unconfidential P2WPKH (`elements1...`, with equivalent `ert1...` alias);
+- unconfidential P2WPKH in the profile's native encoding (ECX Alpha used
+  `elements1...` with an equivalent `ert1...` alias);
 - explicit (non-confidential) inputs and outputs of **any asset**; the fee is
   always one explicit policy-asset output.
 
@@ -31,7 +38,8 @@ finalizes them itself (maker witnesses are never rebuilt), verifies every
 input signature against a recomputed sighash, and returns raw transaction hex
 — or, for swap offers, the signed offer JSON (§2).
 
-`decode_offer` verifies an offer against its funding transaction (which must
+`decode_offer` checks the offer's `network` (profile id) and `genesis_hash`,
+then verifies it against its funding transaction (which must
 hash to the offered txid) and the maker's 0x83 signature.
 `verify_asset_issuance` recomputes contract hash → entropy → asset/token ids
 from an issuance input.

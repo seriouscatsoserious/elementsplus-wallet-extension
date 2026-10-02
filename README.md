@@ -1,8 +1,20 @@
 # Elements+ Wallet
 
-An experimental browser-extension wallet for the ECX Alpha Elements+ drivechain
-fork. It is **not** a Liquid wallet and never falls back to Liquid, Elements
+An experimental browser-extension wallet for the Elements+ sidechain on eCash
+(ECX). It is **not** a Liquid wallet and never falls back to Liquid, Elements
 regtest, or another chain.
+
+Each artifact is built for exactly one **network profile** from the typed
+registry in [`src/network/profiles.ts`](src/network/profiles.ts) (mirrored in
+`rust/wallet-core/src/network.rs`); the profile's pins are compiled in and are
+never user-editable. See [`docs/NETWORKS.md`](docs/NETWORKS.md).
+
+| Profile | Display name | Status |
+|---|---|---|
+| `ecx-beta` | eCash Beta · Elements | pending: v11 identity pinned (betanet slot 24), no public sidechain Esplora yet |
+| `ecx-mainnet` | eCash · Elements | pending: nothing published (mainnet planned ~2026-10-31) |
+| `elementsplus-regtest` | Elements+ local regtest | live (disposable local chain) |
+| `ecx-alpha` | ECX Alpha (archived) | archived: retired chain, kept for historical tests only |
 
 Start with [the project handoff](docs/HANDOFF.md) for architecture, upstream
 status, remaining security work, and moving development to another machine.
@@ -42,28 +54,40 @@ npm ci --ignore-scripts
 npm run check
 ```
 
-The build compiles `rust/wallet-core` with its lockfile, generates local
-`wasm-bindgen` glue, removes the legacy dynamic-Function compatibility fallback,
-and packages the same WASM bytes into both browser artifacts. No code is loaded
-from a CDN or at runtime.
+`npm run build` builds and checks one artifact per buildable profile. While
+`ecx-beta` and `ecx-mainnet` are pending it builds only the regtest artifact
+(`.regtest/dist/chromium`; against `.regtest/network.json` when a local chain
+exists, else the synthetic CI fixture) and prints which profiles are pending.
+A single public profile is built with
+
+```sh
+ELEMENTSPLUS_NETWORK_PROFILE=ecx-beta npm run build:profile   # or: node scripts/build.mjs --profile ecx-beta
+```
+
+which refuses (exit 3, naming the missing pins) while the profile is pending.
+The build compiles `rust/wallet-core` with its lockfile and
+`ELEMENTSPLUS_NETWORK_PROFILE`, generates local `wasm-bindgen` glue, removes the
+legacy dynamic-Function compatibility fallback, and packages the same WASM
+bytes into both browser artifacts. No code is loaded from a CDN or at runtime.
 
 Load `dist/chromium` as an unpacked Chromium extension or
 `dist/firefox` as a temporary Firefox add-on.
 
 For the disposable, funded, full-node preconfirmation harness, see
-[`docs/REGTEST-WALLET.md`](docs/REGTEST-WALLET.md). It builds a separate
-`LOCAL REGTEST` artifact and does not relax this production artifact's chain
-pin.
+[`docs/REGTEST-WALLET.md`](docs/REGTEST-WALLET.md). It builds the separate
+`elementsplus-regtest` artifact and does not relax a public artifact's chain
+pins.
 
 For the complete copy-pasteable local browser handoff, see
 [docs/LOCAL-TESTING.md](docs/LOCAL-TESTING.md).
 
 The unit tests do not require a live node; initial dependency installation and
 builds may need network access. To opt
-into a read-only smoke test against the configured ECX Alpha explorer, run:
+into a read-only smoke test against a live profile's explorer
+(`ECX_LIVE_PROFILE`, default `ecx-beta`; refused while it is pending), run:
 
 ```sh
-ECX_ALPHA_LIVE_TEST=1 npm run test:live
+ECX_LIVE_TEST=1 npm run test:live
 ```
 
 The smoke test fails unless the explorer serves the pinned genesis and policy

@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{WalletError, MAX_RAW_TRANSACTION_BYTES};
 
-/// Protocol identifier carried in every offer.
-pub const OFFER_NETWORK: &str = "ecx-alpha";
+// The `network` field of every offer is the maker's network profile id
+// (`crate::network::NetworkProfile::id`, e.g. `ecx-beta`); consumers match it
+// together with `genesis_hash`.
 pub const OFFER_VERSION: u32 = 1;
 /// Offers are tiny; anything larger is refused before decoding.
 pub const MAX_OFFER_JSON_BYTES: usize = 16_384;
@@ -141,6 +142,7 @@ pub(crate) fn verify_p2wpkh_witness(
 pub(crate) fn verify_offer(
     offer: &Offer,
     prevout_raw_tx_hex: &str,
+    expected_network: &str,
     expected_genesis: BlockHash,
     address_params: &'static AddressParams,
 ) -> Result<VerifiedOffer, WalletError> {
@@ -150,8 +152,11 @@ pub(crate) fn verify_offer(
             offer.version
         )));
     }
-    if offer.network != OFFER_NETWORK {
-        return Err(offer_error("offer network is not ecx-alpha"));
+    if offer.network != expected_network {
+        return Err(offer_error(format!(
+            "offer network {:?} is not this wallet's network {expected_network:?}",
+            offer.network
+        )));
     }
     let genesis = BlockHash::from_str(&offer.genesis_hash)
         .map_err(|_| offer_error("offer genesis hash is invalid"))?;

@@ -1,3 +1,4 @@
+import { NETWORK_IDENTITY } from "../../network/identity.js";
 /** Home (balances), Manage tokens, Receive. */
 import type { AssetBalance } from "../../adapters/elementsplus-wasm.js";
 import { encodeQr, qrPath } from "../../shared/qr.js";
@@ -29,11 +30,11 @@ function writeHidden(hidden: Set<string>): void {
 
 function header(app: App): HTMLElement {
   const network = app.status?.network;
-  const regtest = network?.mode === "elementsplus-regtest";
+  const regtest = network?.id === "elementsplus-regtest";
   return h("header", { class: "top" },
     h("button", { class: "acct", type: "button", onclick: () => app.go("receive") }, h("span", { class: "av" }, "A"), "Account 1"),
     h("span", { class: `net${regtest ? " test" : ""}`, title: network === undefined ? "" : `Genesis ${shortId(network.genesisHash, 8, 8)}` },
-      h("span", { class: `dot${app.walletError !== undefined ? " bad" : ""}` }), network?.name ?? "ECX Alpha"),
+      h("span", { class: `dot${app.walletError !== undefined ? " bad" : ""}` }), network?.name ?? NETWORK_IDENTITY.displayName),
     h("button", { class: "ib", type: "button", "aria-label": "Lock wallet", title: "Lock", onclick: () => void app.lock() }, icon("lock")),
   );
 }
@@ -145,7 +146,7 @@ export function qrSvg(text: string, pixels = 184): SVGElement {
 
 export function receiveScreen(app: App): HTMLElement {
   const address = app.wallet?.snapshot.receiveAddress ?? app.status?.primaryAddress ?? null;
-  const network = app.status?.network.name ?? "ECX Alpha";
+  const network = app.status?.network.name ?? NETWORK_IDENTITY.displayName;
   return h("div", { class: "screen" },
     backHeader(app, "Receive"),
     h("div", { class: "body center-items" },

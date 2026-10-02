@@ -1,4 +1,4 @@
-import { ECX_ALPHA_IDENTITY } from "../network/identity.js";
+import { NETWORK_IDENTITY } from "../network/identity.js";
 import { normalizeEndpoint } from "../network/http.js";
 import type { ExtensionStorageArea } from "../platform/browser.js";
 import { hasExactKeys, isPlainRecord, ValidationError } from "../shared/validation.js";
@@ -19,9 +19,9 @@ export interface WalletSettings {
 }
 
 export function defaultSettings(): WalletSettings {
-  const dexUrl = ECX_ALPHA_IDENTITY.dexUrl;
+  const dexUrl = NETWORK_IDENTITY.dexUrl;
   return Object.freeze({
-    explorerUrl: ECX_ALPHA_IDENTITY.explorerUrl,
+    explorerUrl: NETWORK_IDENTITY.explorerUrl,
     registryUrl: dexUrl === "" ? "" : `${dexUrl.replace(/\/+$/u, "")}/api/assets`,
     dexUrl,
     autoLockMinutes: DEFAULT_AUTO_LOCK_MINUTES,

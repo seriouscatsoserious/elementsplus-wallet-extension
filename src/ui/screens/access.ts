@@ -1,3 +1,4 @@
+import { NETWORK_IDENTITY } from "../../network/identity.js";
 /** Lock gate and onboarding (create / import / restore → phrase → confirm → password). */
 import type { App, ScreenParams } from "../lib/app.js";
 import { h } from "../lib/dom.js";
@@ -70,7 +71,7 @@ export function welcomeScreen(app: App): HTMLElement {
       brandMark("lg"),
       h("div", { class: "center" },
         h("h1", { class: "title" }, "Elements+ Wallet"),
-        h("p", { class: "muted sub" }, `A self-custodial wallet for ${app.status?.network.name ?? "ECX Alpha"}`),
+        h("p", { class: "muted sub" }, `A self-custodial wallet for ${app.status?.network.name ?? NETWORK_IDENTITY.displayName}`),
       ),
     ),
     h("div", { class: "stack" },

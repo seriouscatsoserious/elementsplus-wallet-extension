@@ -6,7 +6,7 @@ import type { WalletAddress, WalletSession, WalletSnapshot } from "../../src/ada
 import { WalletController, type ApprovalView, type WalletOpener, type WalletResponse } from "../../src/background/controller.js";
 import type { PreparedPlan, WalletOperation } from "../../src/background/operations.js";
 import { SettingsStore } from "../../src/background/settings.js";
-import { ECX_ALPHA_IDENTITY } from "../../src/network/identity.js";
+import { NETWORK_IDENTITY } from "../../src/network/identity.js";
 import { VaultStore } from "../../src/vault.js";
 import {
   ADDRESS_1, ADDRESS_2, ECX, GENESIS, MemoryStorage, MNEMONIC, PASSWORD, preparedJson, rawReview, TOKEN_A, txid, type RawReview,
@@ -72,7 +72,7 @@ async function setup(now = { value: Date.parse("2026-10-02T00:00:00Z") }) {
     storage,
     wallets: opener,
     settings: new SettingsStore(storage),
-    identity: ECX_ALPHA_IDENTITY,
+    identity: NETWORK_IDENTITY,
     now: () => new Date(now.value),
     approvalTimeoutMilliseconds: 60_000,
   });

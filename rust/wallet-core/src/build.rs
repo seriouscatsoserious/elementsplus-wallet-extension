@@ -560,6 +560,7 @@ impl WalletCore {
             let offer = verify_offer(
                 &offer,
                 &entry.prevout_raw_tx_hex,
+                &self.network_id,
                 self.genesis_hash,
                 self.native_address_params,
             )?;

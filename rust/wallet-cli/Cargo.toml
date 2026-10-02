@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.89"
 license = "MIT"
-description = "epw: headless, agent-friendly ECX Alpha wallet (CLI + MCP server)"
+description = "epw: headless, agent-friendly Elements+ wallet (CLI + MCP server)"
 publish = false
 
 [[bin]]

@@ -8,11 +8,12 @@ import type { ConnectedSite, WalletSettings } from "../../background/settings.js
 import type { TokenInfo } from "../../background/token-registry.js";
 import type { ActivityEntry } from "../../network/activity.js";
 import { getExtensionApi, sendExtensionMessage } from "../../platform/browser.js";
+import type { AnyNetworkProfileId } from "../../network/profiles.js";
 import { isPlainRecord } from "../../shared/validation.js";
 
 export interface NetworkInfo {
   readonly name: string;
-  readonly mode: "ecx-alpha" | "elementsplus-regtest";
+  readonly id: AnyNetworkProfileId;
   readonly genesisHash: string;
   readonly policyAsset: string;
   readonly defaultExplorerUrl: string;

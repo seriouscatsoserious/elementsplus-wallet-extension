@@ -25,6 +25,11 @@ observed_tip_hash = "c34d7de42dc2aa0e92271b927146cf1f641ec7ec8dd8175233dbccb9a4a
 observed_at = "2026-09-19T04:57:11+02:00"
 
 [identity]
+# The ECX Alpha chain is retired (archived profile `ecx-alpha`); eCash betanet
+# slot 24 commits to this same v11 identity (profile `ecx-beta`, pending a
+# sidechain Esplora URL). Profiles live in rust/wallet-core/src/network.rs and
+# src/network/profiles.ts.
+profiles = ["ecx-alpha (archived)", "ecx-beta (pending)"]
 sidechain_slot = 24
 genesis_hash = "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd"
 parent_genesis_hash = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"

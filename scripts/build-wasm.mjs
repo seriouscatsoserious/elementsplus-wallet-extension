@@ -4,17 +4,18 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { generatedDirectory } from "./build-paths.mjs";
+import { profileArgument, refuseUnselectable } from "./profile-args.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = path.join(root, "rust", "wallet-core", "Cargo.toml");
+// The WASM core is compiled for exactly one network profile; its constructor
+// takes pins only from that profile (ELEMENTSPLUS_NETWORK_PROFILE).
+const profile = refuseUnselectable(profileArgument(process.argv.slice(2)));
+const regtest = profile.kind === "local-regtest";
+const features = regtest ? "wasm,regtest" : "wasm";
 const output = await generatedDirectory(root,
-  process.env["ELEMENTSPLUS_WASM_OUTPUT"] ?? path.join(root, ".wasm-bindgen"),
+  path.join(root, regtest ? ".wasm-bindgen-regtest" : ".wasm-bindgen"),
   [".wasm-bindgen", ".wasm-bindgen-regtest"]);
-const features = process.env["ELEMENTSPLUS_WASM_FEATURES"] ?? "wasm";
-const expectedOutput = features === "wasm" ? ".wasm-bindgen" : ".wasm-bindgen-regtest";
-if (!["wasm", "wasm,regtest"].includes(features) || output !== path.join(root, expectedOutput)) {
-  throw new Error("Production and regtest WASM features must use their separate output directories");
-}
 const targetWasm = path.join(
   root,
   "rust",
@@ -64,6 +65,7 @@ run("cargo", [
 ], {
   CARGO_INCREMENTAL: "0",
   SOURCE_DATE_EPOCH: "946684800",
+  ELEMENTSPLUS_NETWORK_PROFILE: profile.id,
 });
 run("wasm-bindgen", [
   targetWasm,
@@ -97,4 +99,4 @@ if (/\bnew\s+Function\s*\(|(?:^|[^a-z])eval\s*\(/iu.test(hardenedGlue)) {
 }
 await writeFile(generatedJavaScript, hardenedGlue, "utf8");
 const digest = createHash("sha256").update(await readFile(generatedWasm)).digest("hex");
-process.stdout.write(`Built packaged wallet core WASM (${digest})\n`);
+process.stdout.write(`Built packaged wallet core WASM for ${profile.id} (${digest})\n`);

@@ -3,8 +3,8 @@
  * core (V2 spec §1.3). Every JSON value crossing this boundary is parsed and
  * validated here; nothing else in the extension touches the raw bindings.
  */
-import { resolveEcxAlphaAddress } from "../network/ecx-alpha.js";
-import type { EcxAlphaIdentity } from "../network/identity.js";
+import { resolveEcxAddress } from "../network/esplora.js";
+import type { NetworkIdentity } from "../network/identity.js";
 import { hasExactKeys, isPlainRecord, normalizeMnemonic } from "../shared/validation.js";
 
 export const HEX_32 = /^[0-9a-f]{64}$/u;
@@ -29,7 +29,7 @@ export interface WasmWalletCoreInstance {
   take_swap_offers_json(requestJson: string): string;
   prepare_cancel_json(requestJson: string): string;
   sign_prepared_json(preparedJson: string, approvedReviewHash: string): string;
-  /** Network-aware offer decoding (the free function is pinned to ECX Alpha). */
+  /** Network-aware offer decoding (the free function uses the compiled profile). */
   decode_offer_json(offerJson: string, prevoutRawTxHex: string): string;
   free(): void;
 }
@@ -252,7 +252,7 @@ function explicitAddress(value: unknown, label: string): string {
   const supplied = str(value, label, 200);
   let resolved;
   try {
-    resolved = resolveEcxAlphaAddress(supplied);
+    resolved = resolveEcxAddress(supplied);
   } catch {
     return fail(`${label} is not an address on this network`);
   }
@@ -521,12 +521,12 @@ export class WalletCore {
     return (await this.#core()).validate_mnemonic(normalizeMnemonic(mnemonic)) === true;
   }
 
-  async open(mnemonic: string, identity: EcxAlphaIdentity): Promise<WalletCoreSession> {
+  async open(mnemonic: string, identity: NetworkIdentity): Promise<WalletCoreSession> {
     const bindings = await this.#core();
     const normalized = normalizeMnemonic(mnemonic);
     if (!bindings.validate_mnemonic(normalized)) fail("invalid recovery phrase");
     let instance: WasmWalletCoreInstance;
-    if (identity.mode === "elementsplus-regtest") {
+    if (identity.id === "elementsplus-regtest") {
       const factory = bindings.WasmWalletCore.forRegtest;
       if (typeof factory !== "function") fail("regtest artifact is missing its test-only constructor");
       instance = factory(normalized, identity.genesisHash, identity.nativeAssetId, identity.displayName);

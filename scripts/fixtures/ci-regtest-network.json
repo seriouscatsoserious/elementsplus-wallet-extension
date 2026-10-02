@@ -1,0 +1,7 @@
+{
+  "_comment": "Synthetic chain parameters for building the disposable regtest artifact when no local regtest chain exists (CI). Not a real chain.",
+  "genesisHash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "nativeAssetId": "2222222222222222222222222222222222222222222222222222222222222222",
+  "explorerUrl": "http://127.0.0.1:43199",
+  "dexUrl": "http://127.0.0.1:5173"
+}

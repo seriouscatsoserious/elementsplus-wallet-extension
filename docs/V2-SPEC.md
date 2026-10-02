@@ -12,8 +12,11 @@ forbids remote fonts; fall back to system-ui).
 
 ## 0. Ground rules
 
-- Explicit (non-confidential) outputs only. ECX Alpha is pinned by genesis and
-  policy asset; nothing here relaxes the existing identity checks.
+- Explicit (non-confidential) outputs only. Each wallet build / `epw` config is
+  pinned to one **network profile** (`docs/NETWORKS.md`: `ecx-beta`,
+  `ecx-mainnet`, `elementsplus-regtest`; `ecx-alpha` archived) by genesis and
+  policy asset; nothing here relaxes the existing identity checks. Pending
+  profiles are refused, never guessed.
 - All amounts cross JSON boundaries as **decimal strings of atomic units**
   (`"2500000"`), never floats. Display precision comes from asset metadata
   (`precision`, default 0 for unknown assets, 8 for ECX).
@@ -105,13 +108,22 @@ asset_id, script_pubkey_hex, branch, index`) but any asset is accepted.
 ```json
 {
   "version": 1,
-  "network": "ecx-alpha",
+  "network": "ecx-beta",
   "genesis_hash": "<hex>",
   "tx": "<hex of a 1-input 1-output Elements tx; input witness = [sig||0x83, pubkey]>",
   "give": { "asset_id": "<hex>", "amount": "1000" },
   "want": { "asset_id": "<hex>", "amount": "5000" }
 }
 ```
+
+`network` is the maker wallet's **network profile id** (`ecx-beta`,
+`ecx-mainnet`, `elementsplus-regtest`; historical offers from the retired
+chain say `ecx-alpha`). It is not a display name. Consumers (wallet core, DEX
+server, DEX web) match an offer on **both** `genesis_hash` and `network` =
+their own profile id, and reject any mismatch; the profile id alone is not an
+identity (the archived `ecx-alpha` and `ecx-beta` share the v11 genesis). The
+DEX server's `NETWORK_NAME` must therefore be set to the profile id it serves
+(its default is still the legacy `ecx-alpha`).
 
 `give`/`want` are convenience copies; every consumer re-derives them from
 `tx` + the verified prevout and rejects mismatches. Price = want/give in atomic
@@ -249,8 +261,10 @@ as the extension.
 - Keys: `epw init` (new mnemonic) / `epw import` writes an encrypted keystore
   (`~/.config/epw/`, scrypt or argon2 + XChaCha20-Poly1305); unlock via
   `EPW_PASSWORD` or prompt. Never prints the mnemonic except on `init`.
-- Config: network (ecx-alpha | regtest with genesis/policy asset), Esplora URL,
-  DEX URL, registry URL.
+- Config: network = profile id (`ecx-beta` | `ecx-mainnet` |
+  `elementsplus-regtest` with genesis/policy asset; `regtest` accepted as a
+  legacy spelling; pending/archived profiles refused), Esplora URL and DEX URL
+  (default: the profile's), registry URL.
 - **Policy file** enforced before signing: per-asset max per transaction and
   per rolling 24 h, allowed recipient addresses (optional), allowed DEX URL,
   `require_confirmation` (interactive y/N) vs `auto` for agents. Every

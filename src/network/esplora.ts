@@ -1,24 +1,24 @@
-import { ECX_ALPHA_IDENTITY } from "./identity.js";
+import { NETWORK_IDENTITY } from "./identity.js";
 
 export type FetchImplementation = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
 
-export interface EcxAlphaEsploraOptions {
+export interface EcxEsploraOptions {
   readonly explorerUrl?: string;
   readonly fetchImpl?: FetchImplementation;
   readonly requestTimeoutMs?: number;
 }
 
-export interface VerifiedEcxAlphaIdentity {
+export interface VerifiedNetworkIdentity {
   readonly genesisHash: string;
   readonly policyAssetId: string;
   readonly explorerApiUrl: string;
   readonly verifiedAt: string;
 }
 
-export interface EcxAlphaTip {
+export interface EcxTip {
   readonly height: number;
   readonly hash: string;
   readonly timestamp: number;
@@ -28,32 +28,32 @@ export interface EcxAlphaTip {
   readonly previousBlockHash?: string;
 }
 
-export interface EcxAlphaMempool {
+export interface EcxMempool {
   readonly count: number;
   readonly virtualSize: number;
   readonly totalFeeAtomic: number;
   readonly feeHistogram: readonly (readonly [feeRate: number, virtualSize: number])[];
 }
 
-export interface EcxAlphaFeeEstimate {
+export interface EcxFeeEstimate {
   readonly confirmationTargetBlocks: number;
   readonly satsPerVbyte: number;
 }
 
-export interface EcxAlphaFeeStatus {
+export interface EcxFeeStatus {
   readonly available: boolean;
-  readonly estimates: readonly EcxAlphaFeeEstimate[];
+  readonly estimates: readonly EcxFeeEstimate[];
 }
 
-export interface EcxAlphaNetworkStatus {
-  readonly identity: VerifiedEcxAlphaIdentity;
-  readonly tip: EcxAlphaTip;
-  readonly mempool: EcxAlphaMempool;
-  readonly fees: EcxAlphaFeeStatus;
+export interface EcxNetworkStatus {
+  readonly identity: VerifiedNetworkIdentity;
+  readonly tip: EcxTip;
+  readonly mempool: EcxMempool;
+  readonly fees: EcxFeeStatus;
   readonly sampledAt: string;
 }
 
-export interface EcxAlphaAddress {
+export interface EcxAddress {
   readonly confidential: boolean;
   readonly notation: "canonical" | "lwk-alias";
   readonly witnessVersion: number;
@@ -68,26 +68,26 @@ export interface AddressTransactionStats {
   readonly transactionCount: number;
 }
 
-export interface EcxAlphaAddressSummary {
-  readonly address: EcxAlphaAddress;
+export interface EcxAddressSummary {
+  readonly address: EcxAddress;
   readonly chain: AddressTransactionStats;
   readonly mempool: AddressTransactionStats;
 }
 
-export const ECX_ALPHA_ADDRESS_HRPS = Object.freeze({
+export const ECX_ADDRESS_HRPS = Object.freeze({
   canonical: Object.freeze({
-    unconfidential: ECX_ALPHA_IDENTITY.bech32Hrp,
-    confidential: ECX_ALPHA_IDENTITY.blech32Hrp,
+    unconfidential: NETWORK_IDENTITY.bech32Hrp,
+    confidential: NETWORK_IDENTITY.blech32Hrp,
   }),
   lwkAlias: Object.freeze({
-    unconfidential: ECX_ALPHA_IDENTITY.aliasBech32Hrp,
-    confidential: ECX_ALPHA_IDENTITY.aliasBlech32Hrp,
+    unconfidential: NETWORK_IDENTITY.aliasBech32Hrp,
+    confidential: NETWORK_IDENTITY.aliasBlech32Hrp,
   }),
 } as const);
 
 /** HTTP/backend failure. This never represents a chain-identity mismatch. */
-export class EcxAlphaApiError extends Error {
-  override readonly name = "EcxAlphaApiError";
+export class EcxApiError extends Error {
+  override readonly name = "EcxApiError";
   readonly status: number | null;
 
   constructor(message: string, status: number | null = null, options?: ErrorOptions) {
@@ -96,13 +96,13 @@ export class EcxAlphaApiError extends Error {
   }
 }
 
-/** Fail-closed error raised when an explorer is not the pinned ECX Alpha chain. */
-export class EcxAlphaIdentityError extends Error {
-  override readonly name = "EcxAlphaIdentityError";
+/** Fail-closed error raised when an explorer is not the pinned network chain. */
+export class EcxIdentityError extends Error {
+  override readonly name = "EcxIdentityError";
 }
 
-export class EcxAlphaAddressError extends Error {
-  override readonly name = "EcxAlphaAddressError";
+export class EcxAddressError extends Error {
+  override readonly name = "EcxAddressError";
 }
 
 const HEX_32_BYTES = /^[0-9a-f]{64}$/u;
@@ -197,54 +197,54 @@ function addressProfile(hrp: string): {
   readonly confidential: boolean;
   readonly notation: "canonical" | "lwk-alias";
 } {
-  if (hrp === ECX_ALPHA_ADDRESS_HRPS.canonical.unconfidential) {
+  if (hrp === ECX_ADDRESS_HRPS.canonical.unconfidential) {
     return { profile: BECH32_PROFILE, confidential: false, notation: "canonical" };
   }
-  if (hrp === ECX_ALPHA_ADDRESS_HRPS.lwkAlias.unconfidential) {
+  if (hrp === ECX_ADDRESS_HRPS.lwkAlias.unconfidential) {
     return { profile: BECH32_PROFILE, confidential: false, notation: "lwk-alias" };
   }
-  if (hrp === ECX_ALPHA_ADDRESS_HRPS.canonical.confidential) {
+  if (hrp === ECX_ADDRESS_HRPS.canonical.confidential) {
     return { profile: BLECH32_PROFILE, confidential: true, notation: "canonical" };
   }
-  if (hrp === ECX_ALPHA_ADDRESS_HRPS.lwkAlias.confidential) {
+  if (hrp === ECX_ADDRESS_HRPS.lwkAlias.confidential) {
     return { profile: BLECH32_PROFILE, confidential: true, notation: "lwk-alias" };
   }
-  throw new EcxAlphaAddressError(`unsupported ECX Alpha address prefix: ${hrp}`);
+  throw new EcxAddressError(`unsupported address prefix for this network: ${hrp}`);
 }
 
 function decodeChecksummedAddress(address: string): DecodedAddress {
-  if (address.length === 0) throw new EcxAlphaAddressError("address is empty");
+  if (address.length === 0) throw new EcxAddressError("address is empty");
   let sawLowercase = false;
   let sawUppercase = false;
   for (const character of address) {
     const code = character.charCodeAt(0);
     if (code < 33 || code > 126) {
-      throw new EcxAlphaAddressError("address contains a non-printable character");
+      throw new EcxAddressError("address contains a non-printable character");
     }
     if (character >= "a" && character <= "z") sawLowercase = true;
     if (character >= "A" && character <= "Z") sawUppercase = true;
   }
   if (sawLowercase && sawUppercase) {
-    throw new EcxAlphaAddressError("mixed-case witness address");
+    throw new EcxAddressError("mixed-case witness address");
   }
 
   const normalized = address.toLowerCase();
   const separator = normalized.lastIndexOf("1");
-  if (separator <= 0) throw new EcxAlphaAddressError("invalid witness address separator");
+  if (separator <= 0) throw new EcxAddressError("invalid witness address separator");
   const hrp = normalized.slice(0, separator);
   const { profile } = addressProfile(hrp);
   if (
     normalized.length > profile.maximumLength ||
     separator + 1 + profile.checksumLength > normalized.length
   ) {
-    throw new EcxAlphaAddressError("invalid witness address length");
+    throw new EcxAddressError("invalid witness address length");
   }
 
   const encoded = normalized.slice(separator + 1);
   const allValues: number[] = [];
   for (const character of encoded) {
     const value = CHARSET_REVERSE.get(character);
-    if (value === undefined) throw new EcxAlphaAddressError("invalid witness address character");
+    if (value === undefined) throw new EcxAddressError("invalid witness address character");
     allValues.push(value);
   }
 
@@ -252,7 +252,7 @@ function decodeChecksummedAddress(address: string): DecodedAddress {
   let encoding: AddressEncoding;
   if (checksum === profile.legacyConstant) encoding = profile.legacyName;
   else if (checksum === profile.modernConstant) encoding = profile.modernName;
-  else throw new EcxAlphaAddressError("invalid witness address checksum");
+  else throw new EcxAddressError("invalid witness address checksum");
 
   return {
     hrp,
@@ -311,42 +311,42 @@ function convertBits(
 }
 
 /**
- * Validate an ECX Alpha witness address and return both supported spellings.
+ * Validate a witness address of the compiled network and return both supported spellings.
  * Checksums are recomputed; this is deliberately not a textual prefix swap.
  */
-export function resolveEcxAlphaAddress(address: string): EcxAlphaAddress {
+export function resolveEcxAddress(address: string): EcxAddress {
   const decoded = decodeChecksummedAddress(address.trim());
   const details = addressProfile(decoded.hrp);
   const witnessVersion = decoded.values[0];
   if (witnessVersion === undefined || witnessVersion > 16) {
-    throw new EcxAlphaAddressError("invalid witness version");
+    throw new EcxAddressError("invalid witness version");
   }
   if (witnessVersion === 0 && decoded.encoding !== details.profile.legacyName) {
-    throw new EcxAlphaAddressError("witness v0 requires the legacy checksum");
+    throw new EcxAddressError("witness v0 requires the legacy checksum");
   }
   if (witnessVersion !== 0 && decoded.encoding !== details.profile.modernName) {
-    throw new EcxAlphaAddressError("witness v1+ requires the modern checksum");
+    throw new EcxAddressError("witness v1+ requires the modern checksum");
   }
 
   const decodedBytes = convertBits(decoded.values.slice(1), 5, 8, false);
-  if (decodedBytes === null) throw new EcxAlphaAddressError("invalid witness address padding");
+  if (decodedBytes === null) throw new EcxAddressError("invalid witness address padding");
   const witnessProgram = details.confidential ? decodedBytes.slice(33) : decodedBytes;
   if (details.confidential && decodedBytes.length < 35) {
-    throw new EcxAlphaAddressError("confidential address is missing its blinding public key");
+    throw new EcxAddressError("confidential address is missing its blinding public key");
   }
   if (witnessProgram.length < 2 || witnessProgram.length > 40) {
-    throw new EcxAlphaAddressError("invalid witness program length");
+    throw new EcxAddressError("invalid witness program length");
   }
   if (witnessVersion === 0 && witnessProgram.length !== 20 && witnessProgram.length !== 32) {
-    throw new EcxAlphaAddressError("witness v0 program must be 20 or 32 bytes");
+    throw new EcxAddressError("witness v0 program must be 20 or 32 bytes");
   }
 
   const canonicalHrp = details.confidential
-    ? ECX_ALPHA_ADDRESS_HRPS.canonical.confidential
-    : ECX_ALPHA_ADDRESS_HRPS.canonical.unconfidential;
+    ? ECX_ADDRESS_HRPS.canonical.confidential
+    : ECX_ADDRESS_HRPS.canonical.unconfidential;
   const aliasHrp = details.confidential
-    ? ECX_ALPHA_ADDRESS_HRPS.lwkAlias.confidential
-    : ECX_ALPHA_ADDRESS_HRPS.lwkAlias.unconfidential;
+    ? ECX_ADDRESS_HRPS.lwkAlias.confidential
+    : ECX_ADDRESS_HRPS.lwkAlias.unconfidential;
 
   return Object.freeze({
     confidential: details.confidential,
@@ -382,27 +382,27 @@ function explorerApiUrl(explorerUrl: string): string {
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new EcxAlphaApiError(`${label} response is not an object`);
+    throw new EcxApiError(`${label} response is not an object`);
   }
   return value as Record<string, unknown>;
 }
 
 function nonNegativeNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new EcxAlphaApiError(`${label} is not a non-negative number`);
+    throw new EcxApiError(`${label} is not a non-negative number`);
   }
   return value;
 }
 
 function nonNegativeInteger(value: unknown, label: string): number {
   const parsed = nonNegativeNumber(value, label);
-  if (!Number.isSafeInteger(parsed)) throw new EcxAlphaApiError(`${label} is not an integer`);
+  if (!Number.isSafeInteger(parsed)) throw new EcxApiError(`${label} is not an integer`);
   return parsed;
 }
 
 function hash32(value: unknown, label: string): string {
   if (typeof value !== "string" || !HEX_32_BYTES.test(value)) {
-    throw new EcxAlphaApiError(`${label} is not a 32-byte lowercase hex value`);
+    throw new EcxApiError(`${label} is not a 32-byte lowercase hex value`);
   }
   return value;
 }
@@ -420,10 +420,10 @@ async function boundedResponseText(response: Response): Promise<string> {
   const contentLength = response.headers.get("Content-Length");
   if (contentLength !== null) {
     if (!/^[0-9]+$/u.test(contentLength)) {
-      throw new EcxAlphaApiError("ECX Alpha explorer returned an invalid Content-Length");
+      throw new EcxApiError("Network explorer returned an invalid Content-Length");
     }
     if (Number(contentLength) > MAX_EXPLORER_RESPONSE_BYTES) {
-      throw new EcxAlphaApiError("ECX Alpha explorer response exceeds the 1 MiB limit");
+      throw new EcxApiError("Network explorer response exceeds the 1 MiB limit");
     }
   }
 
@@ -438,7 +438,7 @@ async function boundedResponseText(response: Response): Promise<string> {
       byteLength += value.byteLength;
       if (byteLength > MAX_EXPLORER_RESPONSE_BYTES) {
         await reader.cancel("response too large");
-        throw new EcxAlphaApiError("ECX Alpha explorer response exceeds the 1 MiB limit");
+        throw new EcxApiError("Network explorer response exceeds the 1 MiB limit");
       }
       chunks.push(value);
     }
@@ -455,23 +455,23 @@ async function boundedResponseText(response: Response): Promise<string> {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(body);
   } catch (error) {
-    throw new EcxAlphaApiError("ECX Alpha explorer returned invalid UTF-8", null, {
+    throw new EcxApiError("Network explorer returned invalid UTF-8", null, {
       cause: error,
     });
   }
 }
 
 /**
- * Dependency-free, read-only client for an ECX Alpha-compatible Esplora API.
+ * Dependency-free, read-only client for the compiled network's Esplora API.
  * It intentionally exposes no transaction broadcast, RPC, signing, or DEX path.
  */
-export class EcxAlphaEsploraClient {
+export class EcxEsploraClient {
   readonly explorerApiUrl: string;
   readonly requestTimeoutMs: number;
   private readonly fetchImpl: FetchImplementation;
 
-  constructor(options: EcxAlphaEsploraOptions = {}) {
-    this.explorerApiUrl = explorerApiUrl(options.explorerUrl ?? ECX_ALPHA_IDENTITY.explorerUrl);
+  constructor(options: EcxEsploraOptions = {}) {
+    this.explorerApiUrl = explorerApiUrl(options.explorerUrl ?? NETWORK_IDENTITY.explorerUrl);
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
     if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
       throw new TypeError("request timeout must be a positive integer");
@@ -495,20 +495,20 @@ export class EcxAlphaEsploraClient {
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new EcxAlphaApiError(
-          `ECX Alpha explorer request failed (${response.status})`,
+        throw new EcxApiError(
+          `Network explorer request failed (${response.status})`,
           response.status,
         );
       }
       return await boundedResponseText(response);
     } catch (error) {
-      if (error instanceof EcxAlphaApiError) throw error;
+      if (error instanceof EcxApiError) throw error;
       if (controller.signal.aborted) {
-        throw new EcxAlphaApiError("ECX Alpha explorer request timed out", null, {
+        throw new EcxApiError("Network explorer request timed out", null, {
           cause: error,
         });
       }
-      throw new EcxAlphaApiError("ECX Alpha explorer request failed", null, { cause: error });
+      throw new EcxApiError("Network explorer request failed", null, { cause: error });
     } finally {
       clearTimeout(timeout);
     }
@@ -519,48 +519,48 @@ export class EcxAlphaEsploraClient {
     try {
       return JSON.parse(body) as unknown;
     } catch (error) {
-      throw new EcxAlphaApiError("ECX Alpha explorer returned invalid JSON", null, {
+      throw new EcxApiError("Network explorer returned invalid JSON", null, {
         cause: error,
       });
     }
   }
 
   /** Verify both immutable identity pins. Call before trusting any explorer data. */
-  async verifyIdentity(): Promise<VerifiedEcxAlphaIdentity> {
-    const policyAssetPath = `/asset/${ECX_ALPHA_IDENTITY.nativeAssetId}`;
+  async verifyIdentity(): Promise<VerifiedNetworkIdentity> {
+    const policyAssetPath = `/asset/${NETWORK_IDENTITY.nativeAssetId}`;
     const [genesisBody, assetBody] = await Promise.all([
       this.getText("/block-height/0"),
       this.getJson(policyAssetPath),
     ]);
 
     const actualGenesis = genesisBody.trim();
-    if (actualGenesis !== ECX_ALPHA_IDENTITY.genesisHash) {
-      throw new EcxAlphaIdentityError(
-        `wrong chain: expected genesis ${ECX_ALPHA_IDENTITY.genesisHash}, received ${actualGenesis}`,
+    if (actualGenesis !== NETWORK_IDENTITY.genesisHash) {
+      throw new EcxIdentityError(
+        `wrong chain: expected genesis ${NETWORK_IDENTITY.genesisHash}, received ${actualGenesis}`,
       );
     }
 
     const asset = asRecord(assetBody, "policy asset");
     const actualAsset = asset["asset_id"];
-    if (actualAsset !== ECX_ALPHA_IDENTITY.nativeAssetId) {
-      throw new EcxAlphaIdentityError(
-        `wrong policy asset: expected ${ECX_ALPHA_IDENTITY.nativeAssetId}`,
+    if (actualAsset !== NETWORK_IDENTITY.nativeAssetId) {
+      throw new EcxIdentityError(
+        `wrong policy asset: expected ${NETWORK_IDENTITY.nativeAssetId}`,
       );
     }
 
     return Object.freeze({
-      genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
-      policyAssetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+      genesisHash: NETWORK_IDENTITY.genesisHash,
+      policyAssetId: NETWORK_IDENTITY.nativeAssetId,
       explorerApiUrl: this.explorerApiUrl,
       verifiedAt: new Date().toISOString(),
     });
   }
 
-  async getTip(): Promise<EcxAlphaTip> {
+  async getTip(): Promise<EcxTip> {
     const hash = hash32((await this.getText("/blocks/tip/hash")).trim(), "tip hash");
     const block = asRecord(await this.getJson(`/block/${hash}`), "tip block");
     const returnedHash = hash32(block["id"], "tip block.id");
-    if (returnedHash !== hash) throw new EcxAlphaApiError("tip block hash changed unexpectedly");
+    if (returnedHash !== hash) throw new EcxApiError("tip block hash changed unexpectedly");
 
     const previous = block["previousblockhash"];
     return Object.freeze({
@@ -576,15 +576,15 @@ export class EcxAlphaEsploraClient {
     });
   }
 
-  async getMempool(): Promise<EcxAlphaMempool> {
+  async getMempool(): Promise<EcxMempool> {
     const mempool = asRecord(await this.getJson("/mempool"), "mempool");
     const rawHistogram = mempool["fee_histogram"];
     if (!Array.isArray(rawHistogram)) {
-      throw new EcxAlphaApiError("mempool.fee_histogram is not an array");
+      throw new EcxApiError("mempool.fee_histogram is not an array");
     }
     const feeHistogram = rawHistogram.map((entry, index) => {
       if (!Array.isArray(entry) || entry.length !== 2) {
-        throw new EcxAlphaApiError(`mempool.fee_histogram[${index}] is invalid`);
+        throw new EcxApiError(`mempool.fee_histogram[${index}] is invalid`);
       }
       return Object.freeze([
         nonNegativeNumber(entry[0], `mempool.fee_histogram[${index}][0]`),
@@ -600,12 +600,12 @@ export class EcxAlphaEsploraClient {
     });
   }
 
-  async getFeeStatus(): Promise<EcxAlphaFeeStatus> {
+  async getFeeStatus(): Promise<EcxFeeStatus> {
     const feeEstimates = asRecord(await this.getJson("/fee-estimates"), "fee estimates");
-    const estimates: EcxAlphaFeeEstimate[] = [];
+    const estimates: EcxFeeEstimate[] = [];
     for (const [target, feeRate] of Object.entries(feeEstimates)) {
       if (!/^[1-9][0-9]*$/u.test(target)) {
-        throw new EcxAlphaApiError(`invalid fee-estimate target: ${target}`);
+        throw new EcxApiError(`invalid fee-estimate target: ${target}`);
       }
       estimates.push(
         Object.freeze({
@@ -623,7 +623,7 @@ export class EcxAlphaEsploraClient {
     });
   }
 
-  async getNetworkStatus(): Promise<EcxAlphaNetworkStatus> {
+  async getNetworkStatus(): Promise<EcxNetworkStatus> {
     const identity = await this.verifyIdentity();
     const [tip, mempool, fees] = await Promise.all([
       this.getTip(),
@@ -640,8 +640,8 @@ export class EcxAlphaEsploraClient {
   }
 
   /** Query address counts using the canonical ECX spelling, accepting either input spelling. */
-  async getAddressSummary(address: string): Promise<EcxAlphaAddressSummary> {
-    const resolved = resolveEcxAlphaAddress(address);
+  async getAddressSummary(address: string): Promise<EcxAddressSummary> {
+    const resolved = resolveEcxAddress(address);
     const response = asRecord(
       await this.getJson(`/address/${encodeURIComponent(resolved.canonical)}`),
       "address",

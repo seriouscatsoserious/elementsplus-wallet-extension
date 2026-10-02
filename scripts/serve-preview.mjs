@@ -1,9 +1,14 @@
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist", "chromium");
+// Serves the production artifact when one is built, else the regtest artifact
+// (the only buildable profile while ecx-beta / ecx-mainnet are pending).
+const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = [path.join(repository, "dist", "chromium"), path.join(repository, ".regtest", "dist", "chromium")]
+  .find((candidate) => existsSync(path.join(candidate, "manifest.json"))) ?? path.join(repository, "dist", "chromium");
 const host = "127.0.0.1";
 const portOption = process.argv.indexOf("--port");
 const portText = portOption === -1 ? "43198" : process.argv[portOption + 1];

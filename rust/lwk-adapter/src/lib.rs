@@ -1,6 +1,13 @@
 //! ECX Alpha compatibility helpers for the exact LWK revision pinned in
 //! `UPSTREAM_PINS.toml`.
 //!
+//! ECX Alpha is retired; the identity constants below are its v11 identity,
+//! which the eCash betanet slot-24 proposal commits to unchanged (same
+//! genesis, pegged asset and address encoding). They back both the archived
+//! `ecx-alpha` profile (recorded live-header vectors) and the pending
+//! `ecx-beta` profile in `elementsplus-wallet-core::network`, the registry
+//! wallets select from.
+//!
 //! This crate is deliberately small. It proves the frozen network identity,
 //! parses and hashes the fork's extended block headers, and enforces the
 //! explicit-output policy at the wallet boundary. It does not claim to make
