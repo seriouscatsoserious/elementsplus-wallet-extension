@@ -13,7 +13,7 @@ import {
 } from "./wallet-core.js";
 import type { PreparedPlan, WalletOperation } from "../background/operations.js";
 import { firstInputOutpoint } from "../background/operations.js";
-import type { FetchImplementation } from "../network/ecx-alpha.js";
+import type { FetchImplementation } from "../network/esplora.js";
 import {
   ExplorerHdScanner,
   type ExplorerHdAddressDeriver,
@@ -22,7 +22,7 @@ import {
   type ExplorerHdSnapshotInput,
 } from "../network/explorer-hd-scan.js";
 import { esploraApiBase, fetchText } from "../network/http.js";
-import type { EcxAlphaIdentity } from "../network/identity.js";
+import type { NetworkIdentity } from "../network/identity.js";
 
 export interface AssetBalance {
   readonly assetId: string;
@@ -72,7 +72,7 @@ export type ScannerFactory = (
 ) => Scanner;
 
 export interface SessionOptions {
-  readonly identity: EcxAlphaIdentity;
+  readonly identity: NetworkIdentity;
   readonly explorerUrl: string;
   readonly fetchImpl: FetchImplementation;
   readonly scannerFactory?: ScannerFactory;

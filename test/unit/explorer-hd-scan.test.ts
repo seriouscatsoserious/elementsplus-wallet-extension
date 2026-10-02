@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  resolveEcxAlphaAddress,
+  resolveEcxAddress,
   type FetchImplementation,
-} from "../../src/network/ecx-alpha.js";
+} from "../../src/network/esplora.js";
 import {
   ExplorerHdScanError,
   ExplorerHdScanner,
@@ -14,7 +14,7 @@ import {
   type ExplorerHdRawTransactionVerifier,
   type ExplorerHdVerifiedTransaction,
 } from "../../src/network/explorer-hd-scan.js";
-import { ECX_ALPHA_IDENTITY } from "../../src/network/identity.js";
+import { NETWORK_IDENTITY } from "../../src/network/identity.js";
 
 const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const BLOCK_HASH = "f".repeat(64);
@@ -134,7 +134,7 @@ function fixture(options: FixtureOptions = {}): {
     const altered = options.alterDerived?.(base) ?? base;
     const record = { ...altered, key: `${chain}:${index}` };
     records.set(altered.address, record);
-    records.set(resolveEcxAlphaAddress(altered.address).canonical, record);
+    records.set(resolveEcxAddress(altered.address).canonical, record);
     return altered;
   };
 
@@ -150,10 +150,10 @@ function fixture(options: FixtureOptions = {}): {
         await new Promise<void>((resolve) => setTimeout(resolve, options.responseDelayMs));
       }
       if (path === "/api/block-height/0") {
-        return new Response(ECX_ALPHA_IDENTITY.genesisHash);
+        return new Response(NETWORK_IDENTITY.genesisHash);
       }
-      if (path === `/api/asset/${ECX_ALPHA_IDENTITY.nativeAssetId}`) {
-        return Response.json({ asset_id: ECX_ALPHA_IDENTITY.nativeAssetId });
+      if (path === `/api/asset/${NETWORK_IDENTITY.nativeAssetId}`) {
+        return Response.json({ asset_id: NETWORK_IDENTITY.nativeAssetId });
       }
       if (path === "/api/blocks/tip/hash") return new Response(BLOCK_HASH);
       if (path === `/api/block/${BLOCK_HASH}`) {
@@ -177,7 +177,7 @@ function fixture(options: FixtureOptions = {}): {
               txid: txidFor(record.chain, record.index),
               vout: 0,
               value,
-              asset: ECX_ALPHA_IDENTITY.nativeAssetId,
+              asset: NETWORK_IDENTITY.nativeAssetId,
               status: {
                 confirmed: true,
                 block_height: 300,
@@ -225,7 +225,7 @@ function fixture(options: FixtureOptions = {}): {
       outputs: Object.freeze(request.expectedWalletOutputs.map((output) => Object.freeze({
         vout: output.vout,
         scriptPubKeyHex: output.scriptPubKeyHex,
-        assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+        assetId: NETWORK_IDENTITY.nativeAssetId,
         valueAtomic: "1000",
       }))),
     }));
@@ -391,7 +391,7 @@ describe("HD scan fail-closed validation", () => {
         outputs: [{
           vout: 0,
           scriptPubKeyHex: "0014" + "99".repeat(20),
-          assetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+          assetId: NETWORK_IDENTITY.nativeAssetId,
           valueAtomic: "1000",
         }],
       }),

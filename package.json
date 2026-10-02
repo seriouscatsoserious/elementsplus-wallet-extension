@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Experimental security-first ECX Alpha Elements+ browser wallet",
+  "description": "Experimental security-first Elements+ (eCash Elements sidechain) browser wallet",
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
-    "build": "npm run build:wasm && node scripts/build.mjs && node scripts/check-artifact.mjs",
+    "build": "node scripts/build-all.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "node scripts/test.mjs",
     "test:build": "node --test test/build-paths.test.mjs",
@@ -25,7 +25,8 @@
     "preview": "node scripts/serve-preview.mjs",
     "check": "npm run typecheck && npm test && npm run test:build && npm run build",
     "capture": "node scripts/capture-wallet-screens.mjs",
-    "test:provider": "node scripts/provider-e2e.mjs"
+    "test:provider": "node scripts/provider-e2e.mjs",
+    "build:profile": "node scripts/build-wasm.mjs && node scripts/build.mjs && node scripts/check-artifact.mjs"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

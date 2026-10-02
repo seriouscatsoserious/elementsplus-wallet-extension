@@ -1,4 +1,4 @@
-import type { FetchImplementation } from "./ecx-alpha.js";
+import type { FetchImplementation } from "./esplora.js";
 
 export class HttpError extends Error {
   override readonly name = "HttpError";

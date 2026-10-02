@@ -12,7 +12,7 @@
 import type { SwapOffer, TxReview } from "../adapters/wallet-core.js";
 import type { WalletAddress, WalletSession, WalletSnapshot } from "../adapters/elementsplus-wasm.js";
 import type { ActivityEntry } from "../network/activity.js";
-import type { EcxAlphaIdentity } from "../network/identity.js";
+import type { NetworkIdentity } from "../network/identity.js";
 import type { ExtensionStorageArea } from "../platform/browser.js";
 import { bytesToBase64 } from "../shared/base64.js";
 import { hasExactKeys, isPlainRecord, normalizeMnemonic, requireString, ValidationError } from "../shared/validation.js";
@@ -63,7 +63,7 @@ export interface ControllerDependencies {
   readonly storage: ExtensionStorageArea;
   readonly wallets: WalletOpener;
   readonly settings: SettingsStore;
-  readonly identity: EcxAlphaIdentity;
+  readonly identity: NetworkIdentity;
   readonly tokens?: TokenLookup;
   readonly activity?: ActivityLoader;
   readonly crypto?: Crypto;
@@ -415,7 +415,7 @@ export class WalletController {
       primaryAddress: await this.primaryAddress(),
       network: {
         name: this.#deps.identity.displayName,
-        mode: this.#deps.identity.mode,
+        id: this.#deps.identity.id,
         genesisHash: this.#deps.identity.genesisHash,
         policyAsset: this.#deps.identity.nativeAssetId,
         defaultExplorerUrl: this.#deps.identity.explorerUrl,

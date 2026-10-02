@@ -29,3 +29,18 @@ test("build cleanup rejects symlinked output parents", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("builds refuse pending and archived network profiles before compiling", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  for (const script of ["build-wasm.mjs", "build.mjs", "check-artifact.mjs"]) {
+    for (const [id, reason] of [["ecx-beta", /pending/u], ["ecx-mainnet", /pending/u], ["ecx-alpha", /archived/u], ["nope", /unknown/u]]) {
+      const result = spawnSync(process.execPath, [path.join(root, "scripts", script), "--profile", id], {
+        cwd: root, encoding: "utf8", env: { ...process.env, ELEMENTSPLUS_NETWORK_PROFILE: "" },
+      });
+      assert.equal(result.status, 3, `${script} ${id}: ${result.stderr}`);
+      assert.match(result.stderr, /Refusing to build/u);
+      assert.match(result.stderr, reason);
+    }
+  }
+});

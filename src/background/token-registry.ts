@@ -4,7 +4,7 @@
  * transaction and the registry's contract (`verify_asset_issuance`).
  */
 import type { VerifiedIssuance } from "../adapters/wallet-core.js";
-import type { FetchImplementation } from "../network/ecx-alpha.js";
+import type { FetchImplementation } from "../network/esplora.js";
 import { esploraApiBase, fetchJson, fetchText, HttpError } from "../network/http.js";
 import type { ExtensionStorageArea } from "../platform/browser.js";
 import { isPlainRecord } from "../shared/validation.js";

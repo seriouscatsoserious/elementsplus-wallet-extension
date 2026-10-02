@@ -8,10 +8,10 @@ import type { ApprovalResult, ApprovalView, OperationSummary } from "../../backg
 import type { ConnectedSite, WalletSettings } from "../../background/settings.js";
 import type { TokenInfo } from "../../background/token-registry.js";
 import type { ActivityEntry } from "../../network/activity.js";
-import { ECX_ALPHA_IDENTITY } from "../../network/identity.js";
+import { NETWORK_IDENTITY } from "../../network/identity.js";
 import type { Backend, PendingRequestView, Tokens, TransferDraft, WalletStatus } from "./backend.js";
 
-const ECX = ECX_ALPHA_IDENTITY.nativeAssetId;
+const ECX = NETWORK_IDENTITY.nativeAssetId;
 export const SAMPLE = Object.freeze({
   alpha: "a1fa".padEnd(64, "3"),
   orbit: "0b17".padEnd(64, "7"),
@@ -23,7 +23,7 @@ export const SAMPLE = Object.freeze({
 const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 const tokens: Tokens = {
-  [ECX]: { assetId: ECX, name: ECX_ALPHA_IDENTITY.displayName, ticker: "ECX", precision: 8, verified: true, native: true, tokenFor: null },
+  [ECX]: { assetId: ECX, name: NETWORK_IDENTITY.displayName, ticker: "ECX", precision: 8, verified: true, native: true, tokenFor: null },
   [SAMPLE.alpha]: { assetId: SAMPLE.alpha, name: "Alpha", ticker: "ALPHA", precision: 0, verified: true, native: false, tokenFor: null },
   [SAMPLE.orbit]: { assetId: SAMPLE.orbit, name: "Orbit", ticker: "ORBIT", precision: 2, verified: true, native: false, tokenFor: null },
   [SAMPLE.unknown]: { assetId: SAMPLE.unknown, name: "Unknown asset", ticker: "", precision: 0, verified: false, native: false, tokenFor: null } satisfies TokenInfo,
@@ -54,8 +54,8 @@ const entries: ActivityEntry[] = [
 function review(partial: Partial<TxReview>): TxReview {
   return {
     kind: "transfer",
-    network: ECX_ALPHA_IDENTITY.displayName,
-    genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
+    network: NETWORK_IDENTITY.displayName,
+    genesisHash: NETWORK_IDENTITY.genesisHash,
     balanceChanges: [],
     fee: "210",
     externalOutputs: [],
@@ -116,7 +116,7 @@ export class MockBackend implements Backend {
   initialized: boolean;
   request: PendingRequestView | undefined;
   settings: WalletSettings = {
-    explorerUrl: ECX_ALPHA_IDENTITY.explorerUrl,
+    explorerUrl: NETWORK_IDENTITY.explorerUrl,
     registryUrl: "https://your-dex.example/api/assets",
     dexUrl: "https://your-dex.example",
     autoLockMinutes: 15,
@@ -138,11 +138,11 @@ export class MockBackend implements Backend {
       unlocked: this.unlocked,
       primaryAddress: this.initialized ? SAMPLE.address : null,
       network: {
-        name: ECX_ALPHA_IDENTITY.displayName,
-        mode: ECX_ALPHA_IDENTITY.mode,
-        genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
+        name: NETWORK_IDENTITY.displayName,
+        id: NETWORK_IDENTITY.id,
+        genesisHash: NETWORK_IDENTITY.genesisHash,
         policyAsset: ECX,
-        defaultExplorerUrl: ECX_ALPHA_IDENTITY.explorerUrl,
+        defaultExplorerUrl: NETWORK_IDENTITY.explorerUrl,
       },
       settings: this.settings,
     };

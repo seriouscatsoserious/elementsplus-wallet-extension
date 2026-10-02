@@ -14,10 +14,13 @@ export function generate_mnemonic(): string;
 export function validate_mnemonic(mnemonic: string): boolean;
 /** `{raw_tx_hex, expected_txid, vin, contract}` → `{asset_id, token_id|null, contract_hash}`. */
 export function verify_asset_issuance_json(requestJson: string): string;
-/** Verifies against the pinned ECX Alpha genesis → DecodedOffer JSON. */
+/** Id of the network profile compiled into this WASM build (absent if none). */
+export function network_profile_id(): string | undefined;
+/** Verifies against the compiled network profile → DecodedOffer JSON. */
 export function decode_offer_json(offerJson: string, prevoutRawTxHex: string): string;
 
 export class WasmWalletCore {
+  /** Pins come only from the compiled profile; throws for a regtest or pending build. */
   constructor(mnemonic: string);
   static forRegtest?(
     mnemonic: string,

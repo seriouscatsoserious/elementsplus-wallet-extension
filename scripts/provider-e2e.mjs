@@ -14,12 +14,16 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
 const extension = path.resolve(process.env["EXTENSION_DIST"] ?? path.join(root, "dist", "chromium"));
 const screenshots = process.argv[2];
 const chromeBinary = process.env["CHROME_BIN"] ?? ["/usr/bin/google-chrome", "/usr/bin/chromium"].find((file) => existsSync(file));
-const ECX = "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4";
+const { BUILD_NETWORK_PROFILE: compiledProfile } = await import(
+  pathToFileURL(path.join(extension, "src", "network", "build-profile.js")).href
+);
+const ECX = compiledProfile.nativeAssetId;
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function assert(condition, message) {

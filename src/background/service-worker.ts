@@ -1,7 +1,7 @@
 import { ElementsPlusWalletFactory } from "../adapters/elementsplus-wasm.js";
 import { WalletCore } from "../adapters/wallet-core.js";
 import { loadActivity } from "../network/activity.js";
-import { ECX_ALPHA_IDENTITY } from "../network/identity.js";
+import { NETWORK_IDENTITY } from "../network/identity.js";
 import { getExtensionApi, restrictStorage, type ExtensionPort, type MessageSender } from "../platform/browser.js";
 import { bytesToBase64 } from "../shared/base64.js";
 import { isPlainRecord } from "../shared/validation.js";
@@ -44,14 +44,14 @@ const tokens = new TokenRegistry({
     const current = await settings.get();
     return { registryUrl: current.registryUrl, explorerUrl: current.explorerUrl };
   },
-  nativeAsset: { assetId: ECX_ALPHA_IDENTITY.nativeAssetId, name: ECX_ALPHA_IDENTITY.displayName, ticker: "ECX" },
+  nativeAsset: { assetId: NETWORK_IDENTITY.nativeAssetId, name: NETWORK_IDENTITY.displayName, ticker: "ECX" },
 });
 const controller = new WalletController({
   vaultStore: new VaultStore(api.storage.local),
   storage: api.storage.local,
-  wallets: new ElementsPlusWalletFactory(core, { identity: ECX_ALPHA_IDENTITY, fetchImpl }),
+  wallets: new ElementsPlusWalletFactory(core, { identity: NETWORK_IDENTITY, fetchImpl }),
   settings,
-  identity: ECX_ALPHA_IDENTITY,
+  identity: NETWORK_IDENTITY,
   tokens,
   activity: (options) => loadActivity({ ...options, fetchImpl }),
 });
@@ -66,7 +66,7 @@ function randomId(): string {
 const router = new ProviderRouter({
   controller,
   permissions,
-  identity: ECX_ALPHA_IDENTITY,
+  identity: NETWORK_IDENTITY,
   randomId,
   emit: (origin, event, data) => {
     for (const port of ports.get(origin) ?? []) {

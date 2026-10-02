@@ -4,14 +4,18 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const extensionDirectory = path.resolve(process.env["EXTENSION_DIST"] ?? path.join(root, "dist", "chromium"));
 const chromeBinary = process.env["CHROME_BIN"] ?? "/usr/bin/google-chrome";
-const expectedGenesis = process.env["EXPECTED_GENESIS"] ?? "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd";
-const expectedNativeAsset = process.env["EXPECTED_NATIVE_ASSET"] ?? "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4";
-const expectedAddressHrp = process.env["EXPECTED_ADDRESS_HRP"] ?? "elements";
+// Expectations default to the network profile compiled into the artifact.
+const { BUILD_NETWORK_PROFILE: compiledProfile } = await import(
+  pathToFileURL(path.join(extensionDirectory, "src", "network", "build-profile.js")).href
+);
+const expectedGenesis = process.env["EXPECTED_GENESIS"] ?? compiledProfile.genesisHash;
+const expectedNativeAsset = process.env["EXPECTED_NATIVE_ASSET"] ?? compiledProfile.nativeAssetId;
+const expectedAddressHrp = process.env["EXPECTED_ADDRESS_HRP"] ?? compiledProfile.bech32Hrp;
 const startupTimeoutMilliseconds = 30_000;
 const operationTimeoutMilliseconds = 90_000;
 

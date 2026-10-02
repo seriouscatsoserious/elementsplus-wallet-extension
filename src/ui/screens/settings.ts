@@ -1,3 +1,4 @@
+import { NETWORK_IDENTITY } from "../../network/identity.js";
 /** Settings: network & endpoints, connected sites, auto-lock, recovery phrase, advanced pins. */
 import type { ConnectedSite } from "../../background/settings.js";
 import type { App, ScreenParams } from "../lib/app.js";
@@ -49,7 +50,7 @@ export function settingsScreen(app: App): HTMLElement {
     titleHeader("Settings"),
     h("div", { class: "list" },
       h("div", { class: "grp" }, "Network"),
-      row("globe", "Network & endpoints", `${status?.network.name ?? "ECX Alpha"} · ${explorerHost}`, () => app.go("settings-network")),
+      row("globe", "Network & endpoints", `${status?.network.name ?? NETWORK_IDENTITY.displayName} · ${explorerHost}`, () => app.go("settings-network")),
       row("link", "Connected sites", sitesCache === undefined ? "…" : sitesCache.length === 0 ? "None" : `${sitesCache.length} site${sitesCache.length === 1 ? "" : "s"}`, () => app.go("settings-sites")),
       h("div", { class: "grp" }, "Security"),
       h("label", { class: "srow" },
@@ -103,7 +104,7 @@ export function networkSettingsScreen(app: App, params: ScreenParams): HTMLEleme
   return h("div", { class: "screen" },
     backHeader(app, "Network & endpoints"),
     h("form", { class: "body scroll", onsubmit: (event: Event) => { event.preventDefault(); save.click(); } },
-      h("dl", { class: "card m0" }, kv("Network", app.status?.network.name ?? "ECX Alpha")),
+      h("dl", { class: "card m0" }, kv("Network", app.status?.network.name ?? NETWORK_IDENTITY.displayName)),
       explorer.element,
       registry.element,
       dex.element,
@@ -172,7 +173,7 @@ export function advancedScreen(app: App): HTMLElement {
         kv("Genesis", h("span", { class: "mono wrap" }, network?.genesisHash ?? "")),
         kv("Policy asset", h("span", { class: "mono wrap" }, network?.policyAsset ?? "")),
         kv("Outputs", "Explicit only"),
-        kv("Build", network?.mode === "elementsplus-regtest" ? "Local regtest" : "Production"),
+        kv("Build", network?.id === "elementsplus-regtest" ? "Local regtest" : "Production"),
       ),
       h("p", { class: "muted tiny m0" }, `Explorer: ${shortId(app.status?.settings.explorerUrl ?? "", 40, 0)}`),
     ),

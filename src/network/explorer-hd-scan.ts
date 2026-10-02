@@ -1,9 +1,9 @@
 import {
-  EcxAlphaAddressError,
+  EcxAddressError,
   type FetchImplementation,
-  resolveEcxAlphaAddress,
-} from "./ecx-alpha.js";
-import { ECX_ALPHA_IDENTITY } from "./identity.js";
+  resolveEcxAddress,
+} from "./esplora.js";
+import { NETWORK_IDENTITY } from "./identity.js";
 import { isPlainRecord } from "../shared/validation.js";
 
 export const EXPLORER_HD_CHAINS = Object.freeze(["external", "change"] as const);
@@ -330,9 +330,9 @@ function parseDerivedAddress(
   }
   let address: string;
   try {
-    address = resolveEcxAlphaAddress(rawAddress).canonical;
+    address = resolveEcxAddress(rawAddress).canonical;
   } catch (error) {
-    if (error instanceof EcxAlphaAddressError) {
+    if (error instanceof EcxAddressError) {
       throw new ExplorerHdScanError("address deriver returned a non-ECX address", null, {
         cause: error,
       });
@@ -506,7 +506,7 @@ export class ExplorerHdScanner {
     verifyRawTransaction: ExplorerHdRawTransactionVerifier,
     options: ExplorerHdScanOptions = {},
   ) {
-    this.explorerApiUrl = explorerApiUrl(options.explorerUrl ?? ECX_ALPHA_IDENTITY.explorerUrl);
+    this.explorerApiUrl = explorerApiUrl(options.explorerUrl ?? NETWORK_IDENTITY.explorerUrl);
     this.requestTimeoutMs = positiveIntegerOption(
       options.requestTimeoutMs ?? 10_000,
       "request timeout",
@@ -591,12 +591,12 @@ export class ExplorerHdScanner {
 
   private async verifyIdentityPins(signal: AbortSignal): Promise<void> {
     const genesis = await this.getText("/block-height/0", 256, signal);
-    const assetValue = await this.getJson(`/asset/${ECX_ALPHA_IDENTITY.nativeAssetId}`, signal);
-    if (genesis.trim() !== ECX_ALPHA_IDENTITY.genesisHash) {
+    const assetValue = await this.getJson(`/asset/${NETWORK_IDENTITY.nativeAssetId}`, signal);
+    if (genesis.trim() !== NETWORK_IDENTITY.genesisHash) {
       throw new ExplorerHdScanError("explorer does not match the pinned ECX genesis");
     }
     const asset = asRecord(assetValue, "policy asset");
-    if (asset["asset_id"] !== ECX_ALPHA_IDENTITY.nativeAssetId) {
+    if (asset["asset_id"] !== NETWORK_IDENTITY.nativeAssetId) {
       throw new ExplorerHdScanError("explorer does not match the pinned ECX native asset");
     }
   }
@@ -620,7 +620,7 @@ export class ExplorerHdScanner {
       }
       let echoedAddress: string;
       try {
-        echoedAddress = resolveEcxAlphaAddress(summary["address"]).canonical;
+        echoedAddress = resolveEcxAddress(summary["address"]).canonical;
       } catch (error) {
         throw new ExplorerHdScanError("explorer returned an invalid address echo", null, {
           cause: error,
@@ -898,8 +898,8 @@ export class ExplorerHdScanner {
         source: Object.freeze({
           kind: "esplora" as const,
           explorerApiUrl: this.explorerApiUrl,
-          genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
-          nativeAssetId: ECX_ALPHA_IDENTITY.nativeAssetId,
+          genesisHash: NETWORK_IDENTITY.genesisHash,
+          nativeAssetId: NETWORK_IDENTITY.nativeAssetId,
           identityPinsMatched: true as const,
           headerChainVerified: false as const,
         }),

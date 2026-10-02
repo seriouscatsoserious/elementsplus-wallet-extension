@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ExtensionStorageArea } from "../../src/platform/browser.js";
-import { ECX_ALPHA_IDENTITY } from "../../src/network/identity.js";
+import { NETWORK_IDENTITY } from "../../src/network/identity.js";
 import {
   decryptVault,
   encryptVault,
@@ -16,8 +16,8 @@ const payload: WalletVaultPayload = {
   walletId: "abcdefghijklmnopqrstuv",
   mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
   createdAt: "2026-09-19T12:00:00.000Z",
-  networkKey: ECX_ALPHA_IDENTITY.key,
-  genesisHash: ECX_ALPHA_IDENTITY.genesisHash,
+  networkKey: NETWORK_IDENTITY.key,
+  genesisHash: NETWORK_IDENTITY.genesisHash,
   explicitOutputsOnly: true,
 };
 

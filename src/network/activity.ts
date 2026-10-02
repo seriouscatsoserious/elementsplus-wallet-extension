@@ -5,7 +5,7 @@
  * not verified by the wallet core. It must never be used to build or approve
  * transactions, and the UI must not label it as verified.
  */
-import type { FetchImplementation } from "./ecx-alpha.js";
+import type { FetchImplementation } from "./esplora.js";
 import { esploraApiBase, fetchJson } from "./http.js";
 import { isPlainRecord } from "../shared/validation.js";
 

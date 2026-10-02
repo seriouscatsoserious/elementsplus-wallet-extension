@@ -7,7 +7,7 @@ import type { ApprovalResult, ApprovalView } from "../../src/background/controll
 import type { WalletOperation } from "../../src/background/operations.js";
 import { ProviderErrorCode, ProviderRouter, type ProviderResponse, type RouterController } from "../../src/background/provider-router.js";
 import { SitePermissions } from "../../src/background/settings.js";
-import { ECX_ALPHA_IDENTITY } from "../../src/network/identity.js";
+import { NETWORK_IDENTITY } from "../../src/network/identity.js";
 import { ADDRESS_1, ADDRESS_2, ECX, MemoryStorage, rawReview, txid } from "./helpers.js";
 
 const DEX = "https://dex.example";
@@ -55,7 +55,7 @@ function setup() {
   const router = new ProviderRouter({
     controller,
     permissions,
-    identity: ECX_ALPHA_IDENTITY,
+    identity: NETWORK_IDENTITY,
     randomId: () => `request-${(counter += 1)}`,
     openApproval: async (id) => { opened.push(id); return 100 + opened.length; },
     emit: (origin, event, data) => events.push({ origin, event, data }),
@@ -93,7 +93,7 @@ describe("dApp provider router", () => {
     assert.ok("result" in response);
     assert.deepEqual(response.result, {
       address: ADDRESS_1,
-      network: { name: ECX_ALPHA_IDENTITY.displayName, genesisHash: ECX_ALPHA_IDENTITY.genesisHash, policyAsset: ECX_ALPHA_IDENTITY.nativeAssetId },
+      network: { name: NETWORK_IDENTITY.displayName, genesisHash: NETWORK_IDENTITY.genesisHash, policyAsset: NETWORK_IDENTITY.nativeAssetId },
     });
     assert.equal(await permissions.has(DEX), true);
     // A second connect from the same origin is remembered; no new window.

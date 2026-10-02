@@ -6,10 +6,21 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { NetworkProfileError, selectableProfile, toWalletBuildProfile } from "../src/network/profiles.ts";
 
-if (process.env.ECX_ALPHA_LIVE_TEST !== "1") {
-  console.log("Skipped live ECX Alpha smoke test (set ECX_ALPHA_LIVE_TEST=1 to run).");
+const profileId = process.env.ECX_LIVE_PROFILE ?? "ecx-beta";
+if (process.env.ECX_LIVE_TEST !== "1") {
+  console.log(`Skipped live ${profileId} smoke test (set ECX_LIVE_TEST=1 to run).`);
   process.exit(0);
+}
+let profile;
+try {
+  profile = toWalletBuildProfile(selectableProfile(profileId));
+} catch (error) {
+  if (!(error instanceof NetworkProfileError)) throw error;
+  console.error(`Cannot run the live smoke test: ${error.message}`);
+  process.exit(3);
 }
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -37,25 +48,30 @@ try {
     throw new Error("Unable to compile the live smoke-test fixture");
   }
 
+  writeFileSync(
+    join(buildDirectory, "src", "network", "build-profile.js"),
+    `export const BUILD_NETWORK_PROFILE = Object.freeze(${JSON.stringify(profile)});\n`,
+  );
   const networkModule = await import(
-    pathToFileURL(join(buildDirectory, "src", "network", "ecx-alpha.js")).href
+    pathToFileURL(join(buildDirectory, "src", "network", "esplora.js")).href
   );
   const identityModule = await import(
     pathToFileURL(join(buildDirectory, "src", "network", "identity.js")).href
   );
-  const { EcxAlphaEsploraClient, resolveEcxAlphaAddress } = networkModule;
-  const { ECX_ALPHA_IDENTITY } = identityModule;
+  const { EcxEsploraClient, resolveEcxAddress } = networkModule;
+  const { NETWORK_IDENTITY } = identityModule;
 
-  const client = new EcxAlphaEsploraClient();
+  const client = new EcxEsploraClient();
   const status = await client.getNetworkStatus();
 
-  assert.equal(status.identity.genesisHash, ECX_ALPHA_IDENTITY.genesisHash);
-  assert.equal(status.identity.policyAssetId, ECX_ALPHA_IDENTITY.nativeAssetId);
+  assert.equal(status.identity.genesisHash, NETWORK_IDENTITY.genesisHash);
+  assert.equal(status.identity.policyAssetId, NETWORK_IDENTITY.nativeAssetId);
   assert(status.tip.height >= 0);
   assert(/^[0-9a-f]{64}$/u.test(status.tip.hash));
 
+  // LWK alias spelling of a fixed witness program (v11 alias HRP is `ert`).
   const alias = "ert1qw508d6qejxtdg4y5r3zarvary0c5xw7kuu73e0";
-  const address = resolveEcxAlphaAddress(alias);
+  const address = resolveEcxAddress(alias);
   const summary = await client.getAddressSummary(alias);
   assert.equal(summary.address.canonical, address.canonical);
 

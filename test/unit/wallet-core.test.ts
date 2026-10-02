@@ -11,7 +11,7 @@ import {
   type WalletCoreBindings,
   type WasmWalletCoreInstance,
 } from "../../src/adapters/wallet-core.js";
-import { ECX_ALPHA_IDENTITY } from "../../src/network/identity.js";
+import { NETWORK_IDENTITY } from "../../src/network/identity.js";
 import { ADDRESS_1, ADDRESS_2, ECX, GENESIS, MNEMONIC, preparedJson, rawReview, SCRIPT_1, TOKEN_A, txid } from "./helpers.js";
 
 class FakeCore implements WasmWalletCoreInstance {
@@ -121,10 +121,10 @@ describe("wallet core adapter (fake core)", () => {
     const verified = await core.verifyAssetIssuance({ rawTxHex: "00", expectedTxid: txid(2), vin: 1, contract: { name: "A" } });
     assert.deepEqual(issuanceRequest, { raw_tx_hex: "00", expected_txid: txid(2), vin: 1, contract: { name: "A" } });
     assert.equal(verified.assetId, TOKEN_A);
-    const session = await core.open(MNEMONIC, ECX_ALPHA_IDENTITY);
+    const session = await core.open(MNEMONIC, NETWORK_IDENTITY);
     assert.equal(session.deriveAddress("external", 0).address, ADDRESS_1);
     assert.equal(loads, 1);
-    await assert.rejects(core.open(MNEMONIC, { ...ECX_ALPHA_IDENTITY, mode: "elementsplus-regtest" }), /regtest/u);
+    await assert.rejects(core.open(MNEMONIC, { ...NETWORK_IDENTITY, id: "elementsplus-regtest" }), /regtest/u);
     const incomplete = new WalletCore(async () => ({ ...bindings, decode_offer_json: undefined } as unknown as WalletCoreBindings));
     await assert.rejects(incomplete.generateMnemonic(), /decode_offer_json/u);
   });

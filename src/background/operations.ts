@@ -12,7 +12,7 @@ import {
   type SwapOffer,
   type TxReview,
 } from "../adapters/wallet-core.js";
-import { resolveEcxAlphaAddress } from "../network/ecx-alpha.js";
+import { resolveEcxAddress } from "../network/esplora.js";
 import { FEE_PRESETS } from "../shared/amount.js";
 import { hasExactKeys, isPlainRecord, ValidationError } from "../shared/validation.js";
 
@@ -67,7 +67,7 @@ export function explicitAddress(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 200) throw new ValidationError(`${field} is malformed`);
   let resolved;
   try {
-    resolved = resolveEcxAlphaAddress(value.trim());
+    resolved = resolveEcxAddress(value.trim());
   } catch {
     throw new ValidationError(`${field} is not a valid address on this network`);
   }
