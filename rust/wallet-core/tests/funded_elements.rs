@@ -21,8 +21,9 @@ use elements::encode::deserialize;
 use elements::{AddressParams, AssetId, BlockHash, Transaction};
 use elementsplus_wallet_core::{
     verify_asset_issuance, AssetContract, AssetIssuanceVerificationRequest, Branch, CancelRequest,
-    IssuanceRequest, OfferInput, OfferSplitRequest, PreparedTx, SwapOfferRequest, TakeOfferInput,
-    TakeSwapOffersRequest, TransferRequest, TxKind, VerifiedUtxo, WalletCore,
+    ExpectedWalletOutput, IssuanceRequest, OfferInput, OfferSplitRequest, PreparedTx,
+    RawTransactionVerificationRequest, SwapOfferRequest, TakeOfferInput, TakeSwapOffersRequest,
+    TransferRequest, TxKind, VerifiedUtxo, WalletCore,
 };
 use lwk_common::{ElementsParamsBuilder, Network};
 use serde_json::Value;
@@ -471,4 +472,195 @@ fn funded_issue_transfer_swap_and_cancel_are_mined() {
         reason.contains("missing") || reason.contains("spent"),
         "rejected for the spent maker input, not something else: {verdict}"
     );
+}
+
+/// Verify (and unblind) every output of `raw_hex` paying the first wallet
+/// slots, exactly as the extension scanner does through the core.
+fn verified_wallet_utxos(core: &WalletCore, raw_hex: &str) -> Vec<VerifiedUtxo> {
+    let tx = decode(raw_hex);
+    let mut found = Vec::new();
+    for branch in [Branch::External, Branch::Change] {
+        for index in 0..12 {
+            let address = core.derive_address(branch, index).unwrap();
+            let expected: Vec<_> = tx
+                .output
+                .iter()
+                .enumerate()
+                .filter(|(_, o)| {
+                    hex::encode(o.script_pubkey.as_bytes()) == address.script_pubkey_hex
+                })
+                .map(|(vout, _)| ExpectedWalletOutput {
+                    vout: vout as u32,
+                    script_pub_key_hex: address.script_pubkey_hex.clone(),
+                })
+                .collect();
+            if expected.is_empty() {
+                continue;
+            }
+            let verified = core
+                .verify_raw_transaction(&RawTransactionVerificationRequest {
+                    expected_txid: tx.txid().to_string(),
+                    raw_transaction_hex: raw_hex.into(),
+                    expected_wallet_outputs: expected,
+                })
+                .expect("wallet outputs verify and unblind");
+            for output in verified.outputs {
+                found.push(VerifiedUtxo {
+                    txid: verified.txid.clone(),
+                    vout: output.vout,
+                    value: output.value_atomic,
+                    asset_id: output.asset_id,
+                    script_pubkey_hex: output.script_pub_key_hex,
+                    branch,
+                    index,
+                    blinding: output.blinding,
+                });
+            }
+        }
+    }
+    found
+}
+
+/// Amount (in BTC-style decimal) the node's wallet received in `txid`.
+fn node_received(cli: &ElementsCli, txid: &str, asset: &str) -> f64 {
+    let entry = cli.json("gettransaction", &[txid]);
+    entry["details"]
+        .as_array()
+        .expect("details")
+        .iter()
+        .filter(|d| d["category"] == "receive" && d["asset"].as_str() == Some(asset))
+        .map(|d| d["amount"].as_f64().unwrap())
+        .sum()
+}
+
+#[test]
+#[ignore = "spends disposable node funds; set ELEMENTS_DATADIR and run explicitly"]
+fn funded_confidential_receive_and_spend_are_mined() {
+    let cli = ElementsCli::from_env();
+    let mut alice = regtest_core(&cli, &WalletCore::generate_mnemonic().unwrap());
+    alice.set_confidential_receive(true);
+    let policy = alice.policy_asset().to_string();
+    let policy_hex = policy.clone();
+
+    // 1. The node wallet pays Alice's confidential address; it blinds the
+    //    output by default.
+    let receive = alice.derive_address(Branch::External, 0).unwrap();
+    let confidential_address = receive.confidential_address.clone().unwrap();
+    assert!(confidential_address.starts_with("el1"));
+    let funding_txid = cli.string("sendtoaddress", &[&confidential_address, "1.00000000"]);
+    cli.mine();
+    let funding_raw = cli.raw_tx(&funding_txid);
+    let funding_tx = decode(&funding_raw);
+    let wallet_vout = funding_tx
+        .output
+        .iter()
+        .position(|o| hex::encode(o.script_pubkey.as_bytes()) == receive.script_pubkey_hex)
+        .expect("payment to the wallet");
+    assert!(
+        funding_tx.output[wallet_vout].value.is_confidential()
+            && funding_tx.output[wallet_vout].asset.is_confidential(),
+        "the node blinded the payment"
+    );
+    let utxos = verified_wallet_utxos(&alice, &funding_raw);
+    assert_eq!(utxos.len(), 1);
+    let received = utxos[0].clone();
+    assert_eq!(received.value, 100_000_000);
+    assert_eq!(received.asset_id, policy);
+    assert!(received.blinding.is_some());
+    eprintln!("confidential funding {funding_txid}:{wallet_vout}");
+
+    // 2. Spend it back to a confidential node address (CT -> CT).
+    let node_address = cli.string("getnewaddress", &[]);
+    assert!(node_address.starts_with("el1"));
+    let to_node = alice
+        .prepare_transfer(&TransferRequest {
+            recipient: node_address,
+            asset_id: policy.clone(),
+            amount: 40_000_000,
+            fee_rate: 1,
+            change_index: 0,
+            utxos: vec![received],
+        })
+        .unwrap();
+    assert!(to_node.review.confidential);
+    assert!(to_node.review.external_outputs[0].confidential);
+    assert_eq!(
+        to_node.review.balance_changes[0].amount, "-40000000",
+        "exact delta"
+    );
+    let (txid, raw) = sign(&alice, &to_node);
+    cli.broadcast_and_mine(&raw, &txid);
+    eprintln!("confidential -> confidential spend {txid}");
+    // The node unblinds its own output to exactly the reviewed amount.
+    assert_eq!(node_received(&cli, &txid, &policy_hex), 0.4);
+    let vsize = cli.json("getrawtransaction", &[&txid, "true"])["vsize"]
+        .as_u64()
+        .unwrap();
+    assert!(
+        to_node.review.fee >= vsize,
+        "fee {} < {vsize}",
+        to_node.review.fee
+    );
+
+    // 3. Alice's blinded change is found and unblinded by the scanner path.
+    let change = verified_wallet_utxos(&alice, &raw);
+    assert_eq!(change.len(), 1);
+    assert!(change[0].blinding.is_some());
+    assert_eq!(
+        change[0].value,
+        100_000_000 - 40_000_000 - to_node.review.fee
+    );
+
+    // 4. Offer split from confidential funds: explicit offerable output,
+    //    confidential change.
+    let split = alice
+        .prepare_offer_split(&OfferSplitRequest {
+            asset_id: policy.clone(),
+            amount: 10_000_000,
+            fee_rate: 1,
+            utxos: change.clone(),
+            change_index: 1,
+            receive_index: 1,
+        })
+        .unwrap();
+    let (split_txid, split_raw) = sign(&alice, &split);
+    cli.broadcast_and_mine(&split_raw, &split_txid);
+    eprintln!("confidential -> explicit offer split {split_txid}");
+    let after_split = verified_wallet_utxos(&alice, &split_raw);
+    let explicit = after_split
+        .iter()
+        .find(|u| u.blinding.is_none())
+        .expect("explicit split output");
+    assert_eq!(explicit.value, 10_000_000);
+    let blinded = after_split
+        .iter()
+        .find(|u| u.blinding.is_some())
+        .expect("confidential change")
+        .clone();
+
+    // 5. Spend the remaining confidential change to an unconfidential node
+    //    address (CT -> explicit recipient).
+    let destination = cli.string("getnewaddress", &[]);
+    let destination = cli.json("getaddressinfo", &[&destination])["unconfidential"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let to_explicit = alice
+        .prepare_transfer(&TransferRequest {
+            recipient: destination,
+            asset_id: policy,
+            amount: 20_000_000,
+            fee_rate: 1,
+            change_index: 2,
+            utxos: vec![blinded],
+        })
+        .unwrap();
+    assert!(!to_explicit.review.external_outputs[0].confidential);
+    let (txid, raw) = sign(&alice, &to_explicit);
+    cli.broadcast_and_mine(&raw, &txid);
+    eprintln!("confidential -> explicit spend {txid}");
+    assert_eq!(node_received(&cli, &txid, &policy_hex), 0.2);
+    let tx = decode(&raw);
+    assert!(tx.output[0].value.is_explicit());
+    assert!(tx.output[1].value.is_confidential());
 }
