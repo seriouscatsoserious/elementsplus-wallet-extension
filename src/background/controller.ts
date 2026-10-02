@@ -11,7 +11,7 @@
  */
 import type { SwapOffer, TxReview } from "../adapters/wallet-core.js";
 import type { WalletAddress, WalletSession, WalletSnapshot } from "../adapters/elementsplus-wasm.js";
-import type { ActivityEntry } from "../network/activity.js";
+import type { ActivityEntry, ConfidentialUnblinder } from "../network/activity.js";
 import type { EcxAlphaIdentity } from "../network/identity.js";
 import type { ExtensionStorageArea } from "../platform/browser.js";
 import { bytesToBase64 } from "../shared/base64.js";
@@ -56,6 +56,8 @@ export type ActivityLoader = (options: {
   readonly explorerUrl: string;
   readonly addresses: readonly WalletAddress[];
   readonly policyAsset: string;
+  /** Present when the session can unblind confidential wallet outputs locally. */
+  readonly unblind?: ConfidentialUnblinder;
 }) => Promise<ActivityEntry[]>;
 
 export interface ControllerDependencies {
@@ -310,10 +312,12 @@ export class WalletController {
         const session = this.#requireSession();
         if (this.#deps.activity === undefined) return { entries: [], tokens: {} };
         const settings = await this.#deps.settings.get();
+        const unblind = session.unblindOutputs?.bind(session);
         const entries = await this.#deps.activity({
           explorerUrl: settings.explorerUrl,
           addresses: await session.walletAddresses(),
           policyAsset: this.#deps.identity.nativeAssetId,
+          ...(unblind === undefined ? {} : { unblind }),
         });
         const assets = new Set(entries.flatMap((entry) => entry.deltas.map((delta) => delta.assetId)));
         return { entries, tokens: await this.#tokens([...assets], false) };

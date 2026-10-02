@@ -151,6 +151,15 @@ for (const target of ["chromium", "firefox"]) {
       || typeof derived.native_address !== "string"
       || !derived.native_address.startsWith("elements1")
     ) throw new Error(`${target} packaged wallet core derivation smoke test failed`);
+    // Confidential receive is opt-in: off by default, SLIP-77 when requested.
+    const confidential = JSON.parse(core.derive_address_json("external", 0, true));
+    if (
+      "confidential_address" in derived
+      || typeof core.set_confidential_receive !== "function"
+      || confidential.native_address !== derived.native_address
+      || typeof confidential.confidential_address !== "string"
+      || !confidential.confidential_address.startsWith("elementsl1")
+    ) throw new Error(`${target} packaged wallet core confidential derivation smoke test failed`);
     const prepared = JSON.parse(core.prepare_transfer_json(JSON.stringify({
       recipient: recipient.native_address,
       asset_id: "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4",
