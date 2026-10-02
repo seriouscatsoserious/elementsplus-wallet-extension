@@ -22,6 +22,7 @@ elements = { version = "=0.25.3", features = ["serde"] }
 elements-miniscript = "=0.4.0"
 elementsplus-lwk-adapter = { path = "../lwk-adapter" }
 hex = "=0.4.3"
+rand = { version = "=0.8.8", default-features = false, features = ["std", "std_rng"] }
 lwk_common = { git = "https://github.com/blockstream/lwk.git", rev = "55671e82c0cc713ece341f74704ff39255c633ec" }
 lwk_signer = { git = "https://github.com/blockstream/lwk.git", rev = "55671e82c0cc713ece341f74704ff39255c633ec", default-features = false }
 serde = { version = "=1.0.228", features = ["derive"] }

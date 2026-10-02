@@ -3,12 +3,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
+use elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
 use elements::hashes::Hash;
 use elements::pset::{Input, Output, PartiallySignedTransaction, PsbtSighashType};
-use elements::{AssetId, EcdsaSighashType, Script, Sequence};
+use elements::{AssetId, EcdsaSighashType, Script, Sequence, TxOutSecrets};
 use lwk_common::set_genesis_hash;
 use serde::{Deserialize, Serialize};
 
+use crate::confidential::{add_input_proofs, blind_pset, confidential_prevout, request_blinding};
 use crate::issuance::{issuance_ids, AssetContract, MAX_MONEY};
 use crate::offer::{parse_offer_json, verify_offer, Offer, VerifiedOffer};
 use crate::review::{PreparedTx, TxKind};
@@ -32,6 +34,15 @@ const INPUT_WITNESS: u64 = 1 + 1 + 1 + (1 + 73) + (1 + 33) + 1;
 const OUTPUT_BASE: u64 = 33 + 9 + 1 + 1; // asset, value, nonce, script length
 const OUTPUT_WITNESS: u64 = 1 + 1;
 const P2WPKH_SCRIPT_LEN: u64 = 22;
+// A blinded output replaces the 9-byte explicit value and 1-byte null nonce
+// with 33-byte commitments, and adds a surjection proof (at most 3 used
+// inputs of a 256-input domain: 2 + 32 + 32 * 4 bytes) and a 52-bit
+// rangeproof (rust-elements `TxOut::RANGEPROOF_MIN_PRIV_BITS`; values never
+// exceed MAX_MONEY < 2^52), each behind a 3-byte length prefix.
+const BLINDED_OUTPUT_EXTRA_BASE: u64 = (33 - 9) + (33 - 1);
+const SURJECTION_PROOF_MAX: u64 = 2 + 32 + 32 * 4;
+pub(crate) const RANGEPROOF_52_BIT_MAX: u64 = 4_174;
+const BLINDED_OUTPUT_EXTRA_WITNESS: u64 = (3 + SURJECTION_PROOF_MAX) + (3 + RANGEPROOF_52_BIT_MAX);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -127,6 +138,8 @@ struct Shape {
     has_issuance: bool,
     /// Script lengths of all outputs other than change and fee.
     fixed_output_scripts: Vec<u64>,
+    /// How many of the fixed outputs are blinded (confidential recipient).
+    blinded_fixed_outputs: u64,
 }
 
 struct Funding {
@@ -159,8 +172,14 @@ fn parse_asset(text: &str) -> Result<AssetId, WalletError> {
     AssetId::from_str(text).map_err(|_| WalletError::InvalidRequest("invalid asset id".into()))
 }
 
-/// Upper-bound virtual size of a transaction.
-fn estimate_vsize(inputs: u64, issuance: bool, output_scripts: &[u64]) -> Result<u64, WalletError> {
+/// Upper-bound virtual size of a transaction, `blinded_outputs` of whose
+/// outputs are confidential.
+fn estimate_vsize(
+    inputs: u64,
+    issuance: bool,
+    output_scripts: &[u64],
+    blinded_outputs: u64,
+) -> Result<u64, WalletError> {
     let overflow = || WalletError::AmountOverflow;
     let mut base = TX_OVERHEAD_BASE
         .checked_add(inputs.checked_mul(INPUT_BASE).ok_or_else(overflow)?)
@@ -174,6 +193,16 @@ fn estimate_vsize(inputs: u64, issuance: bool, output_scripts: &[u64]) -> Result
             .checked_add(OUTPUT_BASE + script)
             .ok_or_else(overflow)?;
         witness = witness.checked_add(OUTPUT_WITNESS).ok_or_else(overflow)?;
+    }
+    if blinded_outputs > 0 {
+        base = blinded_outputs
+            .checked_mul(BLINDED_OUTPUT_EXTRA_BASE)
+            .and_then(|extra| base.checked_add(extra))
+            .ok_or_else(overflow)?;
+        witness = blinded_outputs
+            .checked_mul(BLINDED_OUTPUT_EXTRA_WITNESS - OUTPUT_WITNESS)
+            .and_then(|extra| witness.checked_add(extra))
+            .ok_or_else(overflow)?;
     }
     let weight = base
         .checked_mul(4)
@@ -197,6 +226,11 @@ impl WalletCore {
     /// `needs` lists how much of each asset the fixed outputs consume beyond
     /// what foreign inputs provide. Policy-asset selection iterates with the
     /// size estimate until the fee is covered.
+    ///
+    /// When any selected input is confidential every change output is
+    /// blinded, and at least one blinded output must exist to balance the
+    /// blinding factors; without a confidential recipient or other change,
+    /// a policy change of at least the dust limit is therefore reserved.
     fn fund(
         &self,
         forced: Vec<ParsedUtxo>,
@@ -275,19 +309,37 @@ impl WalletCore {
             let wallet_inputs = forced_order.len()
                 + selected.values().map(Vec::len).sum::<usize>()
                 + policy_selected.len();
+            let any_confidential = forced_order
+                .iter()
+                .chain(selected.values().flatten())
+                .chain(&policy_selected)
+                .any(|utxo| utxo.blinding.is_some());
             let mut scripts = shape.fixed_output_scripts.clone();
             scripts.extend(std::iter::repeat_n(P2WPKH_SCRIPT_LEN, changes.len() + 1));
             scripts.push(0);
+            let blinded_changes = if any_confidential {
+                changes.len() as u64 + 1
+            } else {
+                0
+            };
             let vsize = estimate_vsize(
                 shape.foreign_inputs + wallet_inputs as u64,
                 shape.has_issuance,
                 &scripts,
+                shape.blinded_fixed_outputs + blinded_changes,
             )?;
             let fee = vsize
                 .checked_mul(fee_rate)
                 .ok_or(WalletError::AmountOverflow)?;
+            let reserve =
+                if any_confidential && shape.blinded_fixed_outputs == 0 && changes.is_empty() {
+                    POLICY_DUST_LIMIT
+                } else {
+                    0
+                };
             let target = need_policy
                 .checked_add(fee)
+                .and_then(|total| total.checked_add(reserve))
                 .ok_or(WalletError::AmountOverflow)?;
             if sum_policy >= target && (wallet_inputs > 0) {
                 break fee;
@@ -324,43 +376,79 @@ impl WalletCore {
         })
     }
 
-    fn wallet_input(&self, utxo: &ParsedUtxo, sighash: EcdsaSighashType) -> Input {
+    fn wallet_input(
+        &self,
+        utxo: &ParsedUtxo,
+        sighash: EcdsaSighashType,
+    ) -> Result<Input, WalletError> {
         let mut input = Input::from_prevout(utxo.outpoint);
         input.sequence = Some(Sequence::MAX);
-        input.witness_utxo = Some(explicit_output(utxo.asset, utxo.value, utxo.script.clone()));
+        input.witness_utxo = Some(match &utxo.blinding {
+            None => explicit_output(utxo.asset, utxo.value, utxo.script.clone()),
+            Some(opened) => confidential_prevout(opened, utxo.script.clone()),
+        });
         input.asset = Some(utxo.asset);
         input.amount = Some(utxo.value);
+        if let Some(opened) = &utxo.blinding {
+            add_input_proofs(&self.secp, &mut input, utxo.asset, utxo.value, opened)?;
+        }
         input.sighash_type = Some(PsbtSighashType::from(sighash));
         input.bip32_derivation.insert(
             utxo.public_key,
             (self.signer.fingerprint(), utxo.path.clone()),
         );
-        input
+        Ok(input)
     }
 
+    fn add_wallet_inputs(
+        &self,
+        pset: &mut PartiallySignedTransaction,
+        inputs: &[ParsedUtxo],
+    ) -> Result<(), WalletError> {
+        for utxo in inputs {
+            pset.add_input(self.wallet_input(utxo, EcdsaSighashType::All)?);
+        }
+        Ok(())
+    }
+
+    /// A wallet-owned output; `blinded` blinds it to this wallet's key.
     fn wallet_output(
         &self,
         asset: AssetId,
         amount: u64,
         branch: Branch,
         index: u32,
+        blinded: bool,
     ) -> Result<Output, WalletError> {
         let (script, key, path) = self.wallet_key(branch, index)?;
+        let blinding_key = blinded.then(|| self.blinding_public_key(&script));
         let mut output = Output::from_txout(explicit_output(asset, amount, script));
         output
             .bip32_derivation
             .insert(key, (self.signer.fingerprint(), path));
+        if let Some(blinding_key) = blinding_key {
+            request_blinding(&mut output, blinding_key);
+        }
         Ok(output)
     }
 
+    /// Change is confidential whenever any wallet input was confidential, so
+    /// spending confidential funds never reveals the remaining amount.
     fn add_changes_and_fee(
         &self,
         pset: &mut PartiallySignedTransaction,
         funding: &Funding,
         change_index: u32,
     ) -> Result<(), WalletError> {
+        let blinded = funding.inputs.iter().any(|utxo| utxo.blinding.is_some());
         for (asset, amount) in &funding.changes {
-            pset.add_output(self.wallet_output(*asset, *amount, Branch::Change, change_index)?);
+            pset.add_output(self.wallet_output(
+                *asset,
+                *amount,
+                Branch::Change,
+                change_index,
+                blinded,
+            )?);
         }
         pset.add_output(Output::from_txout(explicit_output(
             self.policy_asset,
@@ -370,11 +458,38 @@ impl WalletCore {
         Ok(())
     }
 
+    /// Blind (when any output requests it) before the review is computed, so
+    /// the review hash commits to the final blinded PSET bytes. `inputs` are
+    /// the wallet UTXOs in PSET input order; only wallet-funded transactions
+    /// may blind.
     fn finish(
         &self,
         mut pset: PartiallySignedTransaction,
         kind: TxKind,
+        inputs: &[ParsedUtxo],
     ) -> Result<PreparedTx, WalletError> {
+        if pset.outputs().iter().any(|o| o.blinding_key.is_some()) {
+            if inputs.len() != pset.inputs().len() {
+                return Err(WalletError::InvalidPset(
+                    "only fully wallet-funded transactions can be blinded".into(),
+                ));
+            }
+            let secrets: Vec<TxOutSecrets> = inputs
+                .iter()
+                .map(|utxo| match &utxo.blinding {
+                    Some(opened) => {
+                        TxOutSecrets::new(utxo.asset, opened.asset_bf, utxo.value, opened.value_bf)
+                    }
+                    None => TxOutSecrets::new(
+                        utxo.asset,
+                        AssetBlindingFactor::zero(),
+                        utxo.value,
+                        ValueBlindingFactor::zero(),
+                    ),
+                })
+                .collect();
+            blind_pset(&self.secp, &mut pset, &secrets)?;
+        }
         set_genesis_hash(&mut pset, &self.network);
         let review = self.analyze(&pset, kind)?.review;
         let review_hash = self.review_commitment(&pset, &review)?;
@@ -385,7 +500,8 @@ impl WalletCore {
         })
     }
 
-    /// Send any asset to an unconfidential P2WPKH recipient.
+    /// Send any asset to a P2WPKH recipient. A confidential address gets a
+    /// blinded output; an unconfidential one an explicit output.
     pub fn prepare_transfer(&self, request: &TransferRequest) -> Result<PreparedTx, WalletError> {
         validate_amount(request.amount)?;
         let asset = parse_asset(&request.asset_id)?;
@@ -395,7 +511,8 @@ impl WalletCore {
         let shape = Shape {
             foreign_inputs: 0,
             has_issuance: false,
-            fixed_output_scripts: vec![recipient.len() as u64],
+            fixed_output_scripts: vec![recipient.script.len() as u64],
+            blinded_fixed_outputs: u64::from(recipient.blinding_key.is_some()),
         };
         let funding = self.fund(
             Vec::new(),
@@ -407,16 +524,15 @@ impl WalletCore {
         )?;
 
         let mut pset = PartiallySignedTransaction::new_v2();
-        for utxo in &funding.inputs {
-            pset.add_input(self.wallet_input(utxo, EcdsaSighashType::All));
+        self.add_wallet_inputs(&mut pset, &funding.inputs)?;
+        let mut output =
+            Output::from_txout(explicit_output(asset, request.amount, recipient.script));
+        if let Some(blinding_key) = recipient.blinding_key {
+            request_blinding(&mut output, blinding_key);
         }
-        pset.add_output(Output::from_txout(explicit_output(
-            asset,
-            request.amount,
-            recipient,
-        )));
+        pset.add_output(output);
         self.add_changes_and_fee(&mut pset, &funding, request.change_index)?;
-        self.finish(pset, TxKind::Transfer)
+        self.finish(pset, TxKind::Transfer, &funding.inputs)
     }
 
     /// Issue a new explicit asset (and optional reissuance token) to this wallet.
@@ -435,6 +551,7 @@ impl WalletCore {
             foreign_inputs: 0,
             has_issuance: true,
             fixed_output_scripts: fixed,
+            blinded_fixed_outputs: 0,
         };
         let funding = self.fund(
             Vec::new(),
@@ -453,7 +570,7 @@ impl WalletCore {
 
         let mut pset = PartiallySignedTransaction::new_v2();
         for (index, utxo) in funding.inputs.iter().enumerate() {
-            let mut input = self.wallet_input(utxo, EcdsaSighashType::All);
+            let mut input = self.wallet_input(utxo, EcdsaSighashType::All)?;
             if index == 0 {
                 input.issuance_value_amount = Some(request.amount);
                 input.issuance_inflation_keys =
@@ -462,11 +579,14 @@ impl WalletCore {
             }
             pset.add_input(input);
         }
+        // Issued asset and token outputs stay explicit (registry-verifiable);
+        // only change follows the confidential-input rule.
         pset.add_output(self.wallet_output(
             asset_id,
             request.amount,
             Branch::External,
             request.receive_index,
+            false,
         )?);
         if request.token_amount > 0 {
             pset.add_output(self.wallet_output(
@@ -474,10 +594,11 @@ impl WalletCore {
                 request.token_amount,
                 Branch::External,
                 request.receive_index,
+                false,
             )?);
         }
         self.add_changes_and_fee(&mut pset, &funding, request.change_index)?;
-        self.finish(pset, TxKind::Issuance)
+        self.finish(pset, TxKind::Issuance, &funding.inputs)
     }
 
     /// Self-send creating an output of exactly `amount` so it can be offered.
@@ -493,6 +614,7 @@ impl WalletCore {
             foreign_inputs: 0,
             has_issuance: false,
             fixed_output_scripts: vec![P2WPKH_SCRIPT_LEN],
+            blinded_fixed_outputs: 0,
         };
         let funding = self.fund(
             Vec::new(),
@@ -503,17 +625,18 @@ impl WalletCore {
             &BTreeSet::new(),
         )?;
         let mut pset = PartiallySignedTransaction::new_v2();
-        for utxo in &funding.inputs {
-            pset.add_input(self.wallet_input(utxo, EcdsaSighashType::All));
-        }
+        self.add_wallet_inputs(&mut pset, &funding.inputs)?;
+        // The offerable output is always explicit, even from confidential
+        // inputs, because swap offers are explicit-only.
         pset.add_output(self.wallet_output(
             asset,
             request.amount,
             Branch::External,
             request.receive_index,
+            false,
         )?);
         self.add_changes_and_fee(&mut pset, &funding, request.change_index)?;
-        self.finish(pset, TxKind::OfferSplit)
+        self.finish(pset, TxKind::OfferSplit, &funding.inputs)
     }
 
     /// Maker: offer one whole UTXO for `want_amount` of `want_asset`.
@@ -524,20 +647,28 @@ impl WalletCore {
         validate_amount(request.want_amount)?;
         let want_asset = parse_asset(&request.want_asset)?;
         let utxo = self.parse_and_verify_utxo(&request.utxo)?;
+        if utxo.blinding.is_some() {
+            return Err(WalletError::Confidential(format!(
+                "{} is confidential; swap offers are explicit-only, so split it to an \
+                 explicit output with an offer split first",
+                crate::outpoint_label(&utxo.outpoint)
+            )));
+        }
         if utxo.asset == want_asset {
             return Err(WalletError::InvalidRequest(
                 "offer must want a different asset than it gives".into(),
             ));
         }
         let mut pset = PartiallySignedTransaction::new_v2();
-        pset.add_input(self.wallet_input(&utxo, EcdsaSighashType::SinglePlusAnyoneCanPay));
+        pset.add_input(self.wallet_input(&utxo, EcdsaSighashType::SinglePlusAnyoneCanPay)?);
         pset.add_output(self.wallet_output(
             want_asset,
             request.want_amount,
             Branch::External,
             request.receive_index,
+            false,
         )?);
-        self.finish(pset, TxKind::SwapOffer)
+        self.finish(pset, TxKind::SwapOffer, &[])
     }
 
     /// Taker: fill one or more whole offers.
@@ -589,11 +720,13 @@ impl WalletCore {
             return Err(WalletError::AmountOverflow);
         }
 
-        let candidates: Vec<_> = self
+        // Swap takes are explicit-only: confidential wallet UTXOs are never
+        // selected, and an underfunded take says why.
+        let (confidential, candidates): (Vec<_>, Vec<_>) = self
             .parse_utxos(&request.utxos)?
             .into_iter()
             .filter(|utxo| !maker_outpoints.contains(&utxo.outpoint))
-            .collect();
+            .partition(|utxo| utxo.blinding.is_some());
         let mut fixed: Vec<u64> = verified
             .iter()
             .map(|offer| offer.tx.output[0].script_pubkey.len() as u64)
@@ -603,15 +736,30 @@ impl WalletCore {
             foreign_inputs: verified.len() as u64,
             has_issuance: false,
             fixed_output_scripts: fixed,
+            blinded_fixed_outputs: 0,
         };
-        let funding = self.fund(
-            Vec::new(),
-            candidates,
-            &needs,
-            &shape,
-            request.fee_rate,
-            &maker_outpoints,
-        )?;
+        let funding = self
+            .fund(
+                Vec::new(),
+                candidates,
+                &needs,
+                &shape,
+                request.fee_rate,
+                &maker_outpoints,
+            )
+            .map_err(|error| match error {
+                WalletError::InsufficientFunds {
+                    asset,
+                    needed,
+                    available,
+                } if !confidential.is_empty() => WalletError::Confidential(format!(
+                    "insufficient explicit funds for asset {asset} (need {needed}, have \
+                     {available}); swap takes cannot spend the {} confidential UTXO(s) \
+                     supplied — send them to yourself as explicit outputs first",
+                    confidential.len()
+                )),
+                other => other,
+            })?;
 
         let mut pset = PartiallySignedTransaction::new_v2();
         for offer in &verified {
@@ -624,9 +772,7 @@ impl WalletCore {
             input.final_script_witness = Some(txin.witness.script_witness.clone());
             pset.add_input(input);
         }
-        for utxo in &funding.inputs {
-            pset.add_input(self.wallet_input(utxo, EcdsaSighashType::All));
-        }
+        self.add_wallet_inputs(&mut pset, &funding.inputs)?;
         for offer in &verified {
             pset.add_output(Output::from_txout(offer.tx.output[0].clone()));
         }
@@ -636,10 +782,11 @@ impl WalletCore {
                 *amount,
                 Branch::External,
                 request.receive_index,
+                false,
             )?);
         }
         self.add_changes_and_fee(&mut pset, &funding, request.change_index)?;
-        self.finish(pset, TxKind::SwapTake)
+        self.finish(pset, TxKind::SwapTake, &[])
     }
 
     /// Spend an offered UTXO back to this wallet, invalidating the offer.
@@ -650,6 +797,7 @@ impl WalletCore {
             foreign_inputs: 0,
             has_issuance: false,
             fixed_output_scripts: Vec::new(),
+            blinded_fixed_outputs: 0,
         };
         let funding = self.fund(
             vec![utxo],
@@ -667,11 +815,9 @@ impl WalletCore {
             });
         }
         let mut pset = PartiallySignedTransaction::new_v2();
-        for utxo in &funding.inputs {
-            pset.add_input(self.wallet_input(utxo, EcdsaSighashType::All));
-        }
+        self.add_wallet_inputs(&mut pset, &funding.inputs)?;
         self.add_changes_and_fee(&mut pset, &funding, request.change_index)?;
-        self.finish(pset, TxKind::Cancel)
+        self.finish(pset, TxKind::Cancel, &funding.inputs)
     }
 }
 
@@ -681,16 +827,18 @@ mod tests {
 
     #[test]
     fn vsize_estimate_is_monotonic_and_bounded() {
-        let one = estimate_vsize(1, false, &[22, 22, 0]).unwrap();
-        let two = estimate_vsize(2, false, &[22, 22, 0]).unwrap();
+        let one = estimate_vsize(1, false, &[22, 22, 0], 0).unwrap();
+        let two = estimate_vsize(2, false, &[22, 22, 0], 0).unwrap();
         assert!(two > one);
         assert!(
-            estimate_vsize(1, true, &[22, 0]).unwrap()
-                > estimate_vsize(1, false, &[22, 0]).unwrap()
+            estimate_vsize(1, true, &[22, 0], 0).unwrap()
+                > estimate_vsize(1, false, &[22, 0], 0).unwrap()
         );
         // 1-in/3-out explicit P2WPKH Elements tx is ~ 230 vB; keep the bound sane.
         assert!((200..400).contains(&one), "{one}");
-        assert!(estimate_vsize(u64::MAX, false, &[]).is_err());
+        assert!(estimate_vsize(u64::MAX, false, &[], 0).is_err());
+        let blinded = estimate_vsize(1, false, &[22, 22, 0], 2).unwrap();
+        assert!(blinded > one + 2 * 1_000, "{blinded}");
     }
 
     #[test]

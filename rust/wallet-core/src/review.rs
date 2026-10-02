@@ -12,6 +12,9 @@ use elementsplus_lwk_adapter::preview_explicit_pset;
 use lwk_common::get_genesis_hash;
 use serde::{Deserialize, Serialize};
 
+use crate::confidential::{
+    input_has_ct_fields, output_has_ct_fields, verify_input_proofs, verify_output_proofs,
+};
 use crate::issuance::{issuance_ids, MAX_MONEY};
 use crate::offer::{explicit_parts, verify_p2wpkh_witness};
 use crate::{is_wallet_path, p2wpkh_script, WalletCore, WalletError, REVIEW_DOMAIN};
@@ -57,10 +60,18 @@ pub struct AssetDelta {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExternalOutput {
+    /// For a blinded output, the confidential address it is blinded to.
     pub address: String,
     pub asset_id: String,
     #[serde(with = "crate::amount::string")]
     pub amount: u64,
+    /// The output is blinded (amount and asset hidden on chain).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub confidential: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -94,6 +105,11 @@ pub struct TxReview {
     pub foreign_inputs: Vec<String>,
     pub issuance: Option<IssuanceReview>,
     pub sighash: String,
+    /// Some input or output is confidential. Every amount above is still
+    /// exact: confidential inputs and outputs carry explicit-value and
+    /// explicit-asset proofs that are verified against their commitments.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub confidential: bool,
 }
 
 /// Exact unsigned PSET plus its independently reviewable commitment.
@@ -229,7 +245,21 @@ impl WalletCore {
         if get_genesis_hash(pset) != Some(self.genesis_hash) {
             return Err(bad("PSET genesis does not match the configured network"));
         }
-        preview_explicit_pset(pset, self.policy_asset).map_err(|e| bad(e.to_string()))?;
+        let confidential = pset.inputs().iter().any(input_has_ct_fields)
+            || pset.outputs().iter().any(output_has_ct_fields);
+        if confidential {
+            if matches!(kind, TxKind::SwapOffer | TxKind::SwapTake) {
+                return Err(bad(
+                    "swap offers and takes must be fully explicit; confidential inputs or \
+                     outputs are not allowed",
+                ));
+            }
+            if !pset.global.scalars.is_empty() {
+                return Err(bad("PSET blinding is incomplete"));
+            }
+        } else {
+            preview_explicit_pset(pset, self.policy_asset).map_err(|e| bad(e.to_string()))?;
+        }
         let unsigned = pset.extract_tx().map_err(|e| bad(e.to_string()))?;
         if unsigned.version != 2 || unsigned.lock_time != elements::LockTime::ZERO {
             return Err(bad("transaction version or locktime is unsupported"));
@@ -261,8 +291,17 @@ impl WalletCore {
                 .witness_utxo
                 .as_ref()
                 .ok_or_else(|| bad("input lacks witness UTXO"))?;
-            let (asset, value) =
-                explicit_parts(witness).ok_or_else(|| bad("input UTXO is not fully explicit"))?;
+            let (asset, value) = match explicit_parts(witness) {
+                Some(parts) => {
+                    if input.blind_value_proof.is_some() || input.blind_asset_proof.is_some() {
+                        return Err(bad("explicit input carries confidential proofs"));
+                    }
+                    parts
+                }
+                None if confidential => verify_input_proofs(&self.secp, input, witness)
+                    .map_err(|reason| bad(format!("input {index}: {reason}")))?,
+                None => return Err(bad("input UTXO is not fully explicit")),
+            };
             if input.asset != Some(asset)
                 || input.amount != Some(value)
                 || value == 0
@@ -327,10 +366,24 @@ impl WalletCore {
         let mut fee_outputs = 0usize;
         let output_count = pset.outputs().len();
         for (vout, output) in pset.outputs().iter().enumerate() {
-            validate_output_fields(output)?;
+            let blinded = output_has_ct_fields(output);
+            validate_output_fields(output, blinded)?;
             let (Some(asset), Some(amount)) = (output.asset, output.amount) else {
                 return Err(bad("output is missing its explicit asset or amount"));
             };
+            if blinded {
+                verify_output_proofs(&self.secp, output)
+                    .map_err(|reason| bad(format!("output {vout}: {reason}")))?;
+                if output.script_pubkey.is_empty() {
+                    return Err(bad("the fee output must be explicit"));
+                }
+                if output
+                    .blinder_index
+                    .is_none_or(|index| index as usize >= pset.inputs().len())
+                {
+                    return Err(bad(format!("output {vout} has an invalid blinder index")));
+                }
+            }
             if amount == 0 || amount > MAX_MONEY {
                 return Err(bad(format!(
                     "output {vout} amount is outside the money range"
@@ -349,19 +402,50 @@ impl WalletCore {
                 continue;
             }
             if self.output_is_wallet(output) {
+                if blinded {
+                    // Blinded change must be recoverable by this wallet: it
+                    // has to unblind with our key to exactly the reviewed
+                    // asset and amount.
+                    let (unblinded_asset, unblinded_amount, _) = self
+                        .unblind_wallet_output(&unsigned.output[vout])
+                        .map_err(|reason| bad(format!("wallet output {vout}: {reason}")))?;
+                    if unblinded_asset != asset || unblinded_amount != amount {
+                        return Err(bad(format!(
+                            "wallet output {vout} unblinds to a different asset or amount"
+                        )));
+                    }
+                }
                 add(&mut wallet_out, asset, amount)?;
                 external_flags.push(false);
             } else {
-                let address =
-                    Address::from_script(&output.script_pubkey, None, self.native_address_params)
-                        .ok_or_else(|| bad(format!("output {vout} script has no address")))?;
+                let blinder = output.blinding_key.filter(|_| blinded).map(|key| key.inner);
+                let address = Address::from_script(
+                    &output.script_pubkey,
+                    blinder,
+                    self.native_address_params,
+                )
+                .ok_or_else(|| bad(format!("output {vout} script has no address")))?;
                 external_outputs.push(ExternalOutput {
                     address: address.to_string(),
                     asset_id: asset.to_string(),
                     amount,
+                    confidential: blinded,
                 });
                 external_flags.push(true);
             }
+        }
+
+        if confidential {
+            // Commitments balance, every rangeproof and surjection proof
+            // verifies against the spent prevouts.
+            let prevouts: Vec<_> = pset
+                .inputs()
+                .iter()
+                .map(|input| input.witness_utxo.clone().expect("checked above"))
+                .collect();
+            unsigned
+                .verify_tx_amt_proofs(&self.secp, &prevouts)
+                .map_err(|e| bad(format!("confidential proofs do not verify: {e}")))?;
         }
 
         // Conservation: every asset balances, except the maker's half of a
@@ -486,6 +570,7 @@ impl WalletCore {
                 foreign_inputs,
                 issuance: issuance_review,
                 sighash: kind.sighash_label().into(),
+                confidential,
             },
             owners,
         })
@@ -569,8 +654,6 @@ fn validate_input_fields(input: &Input) -> Result<(), WalletError> {
         || input.pegin_witness.is_some()
         || input.is_pegin()
         || input.in_utxo_rangeproof.is_some()
-        || input.blind_value_proof.is_some()
-        || input.blind_asset_proof.is_some()
         || !input.proprietary.is_empty()
         || !input.unknown.is_empty()
     {
@@ -601,16 +684,22 @@ fn validate_input_fields(input: &Input) -> Result<(), WalletError> {
     Ok(())
 }
 
-fn validate_output_fields(output: &elements::pset::Output) -> Result<(), WalletError> {
+/// Blinded outputs carry proofs, verified separately; explicit outputs must
+/// carry none.
+fn validate_output_fields(
+    output: &elements::pset::Output,
+    blinded: bool,
+) -> Result<(), WalletError> {
+    let explicit_proofs = output.value_rangeproof.is_some()
+        || output.asset_surjection_proof.is_some()
+        || output.blind_value_proof.is_some()
+        || output.blind_asset_proof.is_some();
     if output.redeem_script.is_some()
         || output.witness_script.is_some()
         || output.tap_internal_key.is_some()
         || output.tap_tree.is_some()
         || !output.tap_key_origins.is_empty()
-        || output.value_rangeproof.is_some()
-        || output.asset_surjection_proof.is_some()
-        || output.blind_value_proof.is_some()
-        || output.blind_asset_proof.is_some()
+        || (!blinded && explicit_proofs)
         || !output.proprietary.is_empty()
         || !output.unknown.is_empty()
     {

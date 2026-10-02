@@ -81,6 +81,7 @@ fn fund(
             script_pubkey_hex: address.script_pubkey_hex,
             branch,
             index,
+            blinding: None,
         },
         hex::encode(serialize(&tx)),
     )

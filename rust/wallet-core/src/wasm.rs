@@ -51,18 +51,48 @@ impl WasmWalletCore {
             .map_err(js_error)
     }
 
-    pub fn derive_address_json(&self, branch: &str, index: u32) -> Result<String, JsValue> {
+    /// Derive an address. `confidential` overrides the wallet default set by
+    /// `set_confidential_receive` (omitted/undefined keeps the default).
+    pub fn derive_address_json(
+        &self,
+        branch: &str,
+        index: u32,
+        confidential: Option<bool>,
+    ) -> Result<String, JsValue> {
         let branch = match branch {
             "external" => Branch::External,
             "change" => Branch::Change,
             _ => return Err(JsValue::from_str("invalid branch")),
         };
-        to_json(&self.inner.derive_address(branch, index).map_err(js_error)?)
+        to_json(
+            &self
+                .inner
+                .derive_address_with(branch, index, confidential)
+                .map_err(js_error)?,
+        )
     }
 
+    /// Make default receive addresses confidential (off by default). Only
+    /// address derivation changes; owned confidential outputs are always
+    /// unblinded and spendable.
+    pub fn set_confidential_receive(&mut self, enabled: bool) {
+        self.inner.set_confidential_receive(enabled);
+    }
+
+    pub fn confidential_receive(&self) -> bool {
+        self.inner.confidential_receive()
+    }
+
+    /// Verify raw transaction bytes and decode the requested wallet outputs;
+    /// confidential outputs are unblinded with this wallet's SLIP-77 key.
     pub fn verify_raw_transaction_json(&self, request_json: &str) -> Result<String, JsValue> {
         let request = parse(request_json, "verification")?;
-        to_json(&verify_raw_transaction(&request).map_err(js_error)?)
+        to_json(
+            &self
+                .inner
+                .verify_raw_transaction(&request)
+                .map_err(js_error)?,
+        )
     }
 
     pub fn prepare_transfer_json(&self, request_json: &str) -> Result<String, JsValue> {

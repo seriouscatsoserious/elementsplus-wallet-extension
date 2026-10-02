@@ -178,6 +178,7 @@ fn wallet_utxos(core: &WalletCore, raw_hex: &str) -> Vec<VerifiedUtxo> {
                     script_pubkey_hex: address.script_pubkey_hex.clone(),
                     branch,
                     index,
+                    blinding: None,
                 });
             }
         }
