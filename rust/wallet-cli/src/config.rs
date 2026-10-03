@@ -402,12 +402,17 @@ mod tests {
     #[test]
     fn pending_and_archived_profiles_are_refused() {
         let mut config = Config::default();
-        for id in ["ecx-mainnet"] {
-            config.set("network", id).unwrap();
-            let error = config.profile().unwrap_err().to_string();
-            assert!(error.contains("pending"), "{error}");
-            assert!(config.esplora_url().is_err());
-        }
+        config.set("network", "ecx-mainnet").unwrap();
+        let error = config.profile().unwrap_err().to_string();
+        assert!(error.contains("pending"), "{error}");
+        assert!(config.esplora_url().is_err());
+        // Beta is live: its profile and default Esplora resolve.
+        config.set("network", "ecx-beta").unwrap();
+        config.profile().unwrap();
+        assert_eq!(
+            config.esplora_url().unwrap(),
+            "https://explorer.bitnames.info/api"
+        );
         let error = config.set("network", "ecx-alpha").unwrap_err().to_string();
         assert!(error.contains("archived"), "{error}");
         assert!(config.set("network", "liquidv1").is_err());

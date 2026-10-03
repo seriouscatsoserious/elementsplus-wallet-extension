@@ -303,9 +303,23 @@ impl Wallet {
         })
     }
 
+    /// Parse an amount in the asset's display precision. The precision of an
+    /// asset this wallet does not hold is only known from the verified
+    /// registry, so refresh it first; if the asset is still unverified, refuse
+    /// decimal amounts rather than guess (a wrong guess is off by 10^precision).
     pub fn parse_amount_for(&self, asset: &str, amount: &str) -> Result<u64> {
-        let precision = self.label(asset).precision;
-        parse_amount(amount, precision).with_context(|| format!("amount {amount:?}"))
+        let explicit_atomic = amount.trim().starts_with("atomic:");
+        if !explicit_atomic && asset != self.policy_asset && !self.label(asset).verified {
+            self.refresh_registry(true);
+        }
+        let label = self.label(asset);
+        if !explicit_atomic && asset != self.policy_asset && !label.verified {
+            bail!(
+                "amount {amount:?}: asset {asset} has no verified metadata, so its decimals are \
+                 unknown; give the amount as atomic:<base units>"
+            );
+        }
+        parse_amount(amount, label.precision).with_context(|| format!("amount {amount:?}"))
     }
 
     fn display(&self, asset: &str, atomic: u64) -> String {
