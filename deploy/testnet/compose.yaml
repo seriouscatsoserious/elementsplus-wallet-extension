@@ -1,0 +1,65 @@
+# Public Elements+ testnet ("instantnet"): an isolated regtest-mode chain plus
+# the explorer bridge, faucet/miner and DEX server. Every service shares the
+# chain container's network namespace and is published on loopback only;
+# nginx terminates TLS in front. Disposable: no real value.
+name: instantnet
+services:
+  chain:
+    image: instantnet-node
+    build: { context: ., dockerfile: Dockerfile.node }
+    user: "2400:2400"
+    restart: unless-stopped
+    command: >
+      elements-functional-test-node -chain=elementsregtest -datadir=/data -server=1
+      -listen=0 -discover=0 -dnsseed=0 -txindex=1 -fallbackfee=0.0001 -validatepegin=0
+      -con_blocksubsidy=5000000000 -evbparams=simplicity:-1::: -rpcport=18884 -printtoconsole=1
+    volumes: [ "chaindata:/data" ]
+    ports:
+      - "127.0.0.1:43299:43299"   # Esplora bridge
+      - "127.0.0.1:43300:43300"   # faucet
+      - "127.0.0.1:8890:8890"     # DEX server
+  bridge:
+    image: instantnet-services
+    build: { context: ., dockerfile: Dockerfile.services }
+    user: "2400:2400"
+    restart: unless-stopped
+    network_mode: "service:chain"
+    depends_on: [ chain ]
+    environment:
+      ELEMENTSPLUS_REGTEST_DATADIR: /data
+      ELEMENTSPLUS_REGTEST_RPC_PORT: "18884"
+      ELEMENTSPLUS_EXPLORER_PORT: "43299"
+      ELEMENTSPLUS_EXPLORER_HOST: "0.0.0.0"
+    volumes: [ "chaindata:/data:ro" ]
+    command: [ "node", "/opt/scripts/regtest-explorer.mjs" ]
+  faucet:
+    image: instantnet-services
+    user: "2400:2400"
+    restart: unless-stopped
+    network_mode: "service:chain"
+    depends_on: [ chain ]
+    environment:
+      ELEMENTSPLUS_REGTEST_DATADIR: /data
+      ELEMENTSPLUS_REGTEST_RPC_PORT: "18884"
+      ELEMENTSPLUS_FAUCET_PORT: "43300"
+      ELEMENTSPLUS_FAUCET_HOST: "0.0.0.0"
+      ELEMENTSPLUS_FAUCET_AMOUNT: "10"
+      ELEMENTSPLUS_FAUCET_COOLDOWN_MS: "600000"
+      # One block every 60 s, like a (fast) real chain: "Done" via Instant
+      # happens well before the block that settles it.
+      ELEMENTSPLUS_MINE_MODE: interval
+      ELEMENTSPLUS_MINE_EVERY_MS: "60000"
+    volumes: [ "chaindata:/data:ro" ]
+    command: [ "node", "/opt/scripts/regtest-demo.mjs" ]
+  dex:
+    image: instantnet-services
+    user: "2400:2400"
+    restart: unless-stopped
+    network_mode: "service:chain"
+    depends_on: [ bridge ]
+    env_file: [ dex.env ]
+    volumes: [ "dexdata:/var/lib/dex" ]
+    command: [ "elementsplus-dex-server" ]
+volumes:
+  chaindata: {}
+  dexdata: {}

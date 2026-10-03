@@ -11,7 +11,15 @@ const datadir = process.env["ELEMENTSPLUS_REGTEST_DATADIR"] ?? path.join(root, "
 const rpcPort = Number(process.env["ELEMENTSPLUS_REGTEST_RPC_PORT"] ?? "18884");
 const port = Number(process.env["ELEMENTSPLUS_FAUCET_PORT"] ?? "43200");
 const mineEveryMs = Number(process.env["ELEMENTSPLUS_MINE_EVERY_MS"] ?? "4000");
-const FAUCET_AMOUNT = "10";
+// "on-demand" mines when transactions are waiting (local demos); "interval"
+// mines on a fixed clock so a public testnet behaves like a real chain.
+const mineMode = process.env["ELEMENTSPLUS_MINE_MODE"] ?? "on-demand";
+const host = process.env["ELEMENTSPLUS_FAUCET_HOST"] ?? "127.0.0.1";
+const FAUCET_AMOUNT = process.env["ELEMENTSPLUS_FAUCET_AMOUNT"] ?? "10";
+// Per-client cooldown for public deployments (0 disables). The client key is
+// the first X-Forwarded-For hop when behind a trusted local reverse proxy.
+const cooldownMs = Number(process.env["ELEMENTSPLUS_FAUCET_COOLDOWN_MS"] ?? "0");
+const lastFunded = new Map();
 
 async function rpc(method, params = [], wallet = "") {
   const cookie = readFileSync(path.join(datadir, "elementsregtest", ".cookie"), "utf8").trim();
@@ -30,6 +38,17 @@ let minerAddress;
 async function mine(count = 1) {
   minerAddress ??= await rpc("getnewaddress", [], "miner");
   return rpc("generatetoaddress", [count, minerAddress], "miner");
+}
+
+async function bootstrap() {
+  const wallets = await rpc("listwallets");
+  if (!wallets.includes("miner")) {
+    const onDisk = (await rpc("listwalletdir")).wallets.map((w) => w.name);
+    if (onDisk.includes("miner")) await rpc("loadwallet", ["miner"]);
+    else await rpc("createwallet", ["miner", false, false, "", false, true]);
+  }
+  const height = await rpc("getblockcount");
+  if (height < 101) await mine(101 - height);
 }
 
 async function fund(address) {
@@ -53,8 +72,16 @@ button{height:48px;border-radius:12px;border:0;background:#8FA8FF;color:#0E0F13;
 <label for="a">Receive address</label><input id="a" placeholder="ert1q…" autocomplete="off" spellcheck="false">
 <button id="b" type="button">Send ${FAUCET_AMOUNT} test ECX</button><p id="out" role="status"></p></main>
 <script>document.getElementById("b").onclick=async()=>{const o=document.getElementById("out");o.textContent="Sending…";
-try{const r=await fetch("/faucet",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({address:document.getElementById("a").value.trim()})});
+try{const r=await fetch(new URL("faucet",location.href.endsWith("/")?location.href:location.href+"/"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({address:document.getElementById("a").value.trim()})});
 const j=await r.json();o.textContent=r.ok?"Sent and confirmed. Transaction "+j.txid:j.error}catch(e){o.textContent=String(e)}}</script>`;
+
+// Retry until the node answers (containers start together).
+for (let attempt = 0; ; attempt += 1) {
+  try { await bootstrap(); break; } catch (error) {
+    if (attempt > 120) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
 
 http.createServer(async (request, response) => {
   const reply = (status, value, type = "application/json") => {
@@ -62,24 +89,36 @@ http.createServer(async (request, response) => {
     response.end(type === "application/json" ? JSON.stringify(value) : value);
   };
   try {
-    if (request.method === "GET" && request.url === "/") return reply(200, page, "text/html; charset=utf-8");
+    if (request.method === "GET" && (request.url === "/" || request.url === "")) return reply(200, page, "text/html; charset=utf-8");
     if (request.method === "POST" && request.url === "/faucet") {
       let body = "";
       for await (const chunk of request) { body += chunk; if (body.length > 4096) throw new Error("request too large"); }
       const { address } = JSON.parse(body || "{}");
       if (typeof address !== "string" || address.length < 10) return reply(400, { error: "Paste a receive address first." });
+      if (cooldownMs > 0) {
+        const forwarded = String(request.headers["x-forwarded-for"] ?? "").split(",")[0].trim();
+        const client = forwarded || request.socket.remoteAddress || "unknown";
+        const now = Date.now();
+        const last = Math.max(lastFunded.get(client) ?? 0, lastFunded.get(address) ?? 0);
+        if (now - last < cooldownMs) {
+          const minutes = Math.ceil((cooldownMs - (now - last)) / 60_000);
+          return reply(429, { error: `Already sent recently. Try again in about ${minutes} min.` });
+        }
+        lastFunded.set(client, now);
+        lastFunded.set(address, now);
+      }
       return reply(200, { txid: await fund(address) });
     }
     reply(404, { error: "not found" });
   } catch (error) {
     reply(400, { error: error instanceof Error ? error.message : String(error) });
   }
-}).listen(port, "127.0.0.1", () => {
-  process.stdout.write(`Faucet: http://127.0.0.1:${port}  (auto-mining every ${mineEveryMs / 1000}s when transactions are waiting)\n`);
+}).listen(port, host, () => {
+  process.stdout.write(`Faucet: http://${host}:${port}  (${mineMode} mining every ${mineEveryMs / 1000}s)\n`);
 });
 
 setInterval(async () => {
   try {
-    if ((await rpc("getrawmempool")).length > 0) await mine(1);
+    if (mineMode === "interval" || (await rpc("getrawmempool")).length > 0) await mine(1);
   } catch { /* node restarting; try again next tick */ }
 }, mineEveryMs).unref?.();

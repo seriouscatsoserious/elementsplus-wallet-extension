@@ -1,0 +1,19 @@
+# Elements+ node, built from JK's repository at the same commit the wallet's
+# regtest harness pins (scripts/regtest-stack.mjs).
+FROM ubuntu:24.04 AS build
+ARG NODE_COMMIT=006d2a30b1df340f5d77ca9af21e1c3df18b551b
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential cmake ninja-build pkg-config python3 git ca-certificates \
+      libboost-dev libevent-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+RUN git clone --no-checkout https://github.com/ekulkisnek/liquid-drivechain-signet-adaptation.git /src \
+ && git -C /src checkout --detach "$NODE_COMMIT"
+RUN cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=OFF -DBUILD_TESTS=ON \
+      -DBUILD_BENCH=OFF -DWITH_BDB=OFF -DWITH_ZMQ=OFF -DWITH_USDT=OFF -DWITH_MULTIPROCESS=OFF \
+ && cmake --build /build --target elements-functional-test-node elements-functional-test-cli --parallel 16
+
+FROM ubuntu:24.04
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libevent-2.1-7t64 libevent-pthreads-2.1-7t64 libsqlite3-0 ca-certificates \
+ && rm -rf /var/lib/apt/lists/* && useradd -m -u 2400 chain
+COPY --from=build /build/bin/elements-functional-test-node /build/bin/elements-functional-test-cli /usr/local/bin/
+USER chain

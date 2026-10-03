@@ -10,6 +10,8 @@ import path from "node:path";
 
 const datadir = process.env["ELEMENTSPLUS_REGTEST_DATADIR"];
 const port = Number(process.env["ELEMENTSPLUS_EXPLORER_PORT"] ?? "43199");
+// Containers publish ports from 0.0.0.0; default stays loopback-only.
+const host = process.env["ELEMENTSPLUS_EXPLORER_HOST"] ?? "127.0.0.1";
 const rpcPort = Number(process.env["ELEMENTSPLUS_REGTEST_RPC_PORT"] ?? "18884");
 if (!datadir || !Number.isSafeInteger(port) || port < 1024 || port > 65535) {
   throw new Error("regtest explorer requires a datadir and a valid unprivileged port");
@@ -440,7 +442,7 @@ const server = http.createServer((request, response) => {
   });
 });
 await sync();
-server.listen(port, "127.0.0.1", () => {
-  process.stdout.write(`Elements+ regtest explorer bridge listening on 127.0.0.1:${port} (indexed to ${index.tipHeight})\n`);
+server.listen(port, host, () => {
+  process.stdout.write(`Elements+ regtest explorer bridge listening on ${host}:${port} (indexed to ${index.tipHeight})\n`);
 });
 setInterval(() => { void sync().catch(() => undefined); }, 2_000).unref();

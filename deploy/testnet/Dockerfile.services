@@ -1,0 +1,12 @@
+# Node.js helpers (Esplora bridge, faucet/miner) and Rust services (DEX server,
+# later the Instant operator/relay/watchtower), built from rsynced sources.
+FROM rust:1.89-bookworm AS rust
+WORKDIR /src
+COPY src/dex-server /src/dex-server
+RUN cd /src/dex-server && cargo build --release --locked
+
+FROM node:24-bookworm-slim
+RUN useradd -m -u 2401 svc
+COPY --from=rust /src/dex-server/target/release/elementsplus-dex-server /usr/local/bin/
+COPY src/scripts/regtest-explorer.mjs src/scripts/regtest-demo.mjs /opt/scripts/
+USER svc
