@@ -31,7 +31,7 @@ chain:
 - parent checkpoint height 967679; address encoding unchanged (`elements` / `elementsl`)
 
 Slot 24 has been BMM-mined since about parent height 970890; no deposits yet
-as of 2026-10-03. The only missing pin is a public sidechain Esplora.
+as of 2026-10-03. Sidechain Esplora: `https://explorer.bitnames.info/api` (announced by JK on 2026-10-03), so `ecx-beta` is live.
 
 ## Schema
 
