@@ -73,29 +73,33 @@ const ELEMENTS_REGTEST_ADDRESS: ProfileAddressParams = Object.freeze({
 });
 
 /**
- * Elements v11 identity: the retired ECX Alpha chain and the eCash betanet
- * slot-24 proposal (bytes equal `PROPOSAL_DESCRIPTION_HEX` in Elements+
- * `src/elements_drivechain_identity.h`, master 006d2a30) commit to it alike.
+ * Betanet slot-24 child identity from Elements+ `doc/betanet-slot24-test.md`
+ * and `src/elements_drivechain_identity.h` (master feb99d8b, 2026-10-02). It is
+ * authenticated by the existing slot-24 proposal but has its own genesis and
+ * native asset; it is not the retired Alpha chain.
  */
-const ELEMENTS_V11_GENESIS = "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd";
-const ELEMENTS_V11_PEGGED_ASSET = "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4";
+const BETANET_SLOT24_GENESIS = "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f";
+const BETANET_SLOT24_PEGGED_ASSET = "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8";
+/** Retired Alpha v11 identity (Elements+ master 006d2a30). */
+const ALPHA_V11_GENESIS = "672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd";
+const ALPHA_V11_PEGGED_ASSET = "62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4";
 /** L1 genesis; for betanet observed from its Esplora `/block-height/0` (2026-10-02). */
 const ECASH_GENESIS = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";
 
 /**
  * Elements sidechain in slot 24 on eCash betanet (activated at parent height
- * 970715). Pending only because no public sidechain node / Esplora runs on
- * betanet yet: `esploraUrl` is the single missing pin.
+ * 970715; BMM-mined since ~970890). Pending only because no public sidechain
+ * Esplora exists yet: `esploraUrl` is the single missing pin.
  */
 export const ECX_BETA_PROFILE: NetworkProfile = Object.freeze({
   id: "ecx-beta",
   displayName: "eCash Beta · Elements",
   status: "pending",
   kind: "public",
-  implementation: "Elements+ (Elements Drivechain v11)",
+  implementation: "Elements+ (betanet slot-24 test deployment)",
   sidechainSlot: 24,
-  genesisHash: ELEMENTS_V11_GENESIS,
-  policyAssetId: ELEMENTS_V11_PEGGED_ASSET,
+  genesisHash: BETANET_SLOT24_GENESIS,
+  policyAssetId: BETANET_SLOT24_PEGGED_ASSET,
   address: ALPHA_ADDRESS,
   esploraUrl: null,
   l1: Object.freeze({
@@ -152,8 +156,8 @@ export const ECX_ALPHA_ARCHIVED_PROFILE: NetworkProfile = Object.freeze({
   kind: "public",
   implementation: "Elements+",
   sidechainSlot: 24,
-  genesisHash: ELEMENTS_V11_GENESIS,
-  policyAssetId: ELEMENTS_V11_PEGGED_ASSET,
+  genesisHash: ALPHA_V11_GENESIS,
+  policyAssetId: ALPHA_V11_PEGGED_ASSET,
   address: ALPHA_ADDRESS,
   esploraUrl: "https://explorer.bitnames.info/api",
   l1: Object.freeze({

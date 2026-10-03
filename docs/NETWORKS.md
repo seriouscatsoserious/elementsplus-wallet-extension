@@ -17,21 +17,21 @@ compiled in and never user-editable. `epw` selects a profile by id in
 | `elementsplus-regtest` | Elements+ local regtest | `live` | A disposable local chain. Genesis, asset and explorer come from `.regtest/network.json` at build time, or from `epw config` / discovery. |
 | `ecx-alpha` | ECX Alpha (archived) | `archived` | The retired chain. It is kept only so historical tests and vectors pass. Nothing can select it. |
 
-The betanet slot-24 proposal bytes are exactly `PROPOSAL_DESCRIPTION_HEX` in
-Elements+ `src/elements_drivechain_identity.h` (master `006d2a30`). The
-declaration reads "Elements Drivechain v11; parameterized controller profile;
-replay v4; annex v2; one M6 per parent block; withdrawal accumulator v1; BIP301
-checkpoint v1; Simplicity active; slot 24". That makes betanet's sidechain
-identity the same v11 identity the alpha chain used:
+Betanet slot 24 was activated (parent 970715) by the existing Elements v11
+proposal, whose bytes equal Alpha's `PROPOSAL_DESCRIPTION_HEX`. On 2026-10-02 JK
+merged a betanet test deployment (Elements+ master `feb99d8b`,
+`doc/betanet-slot24-test.md`): a **new child identity** authenticated by that
+existing proposal, using betanet replay-v5 / NOP8 rules. It is not the Alpha
+chain:
 
-- genesis `672af009bd90bfc6527a5a9dda4c83aba0048c15cff3697d07e89a7f96fa5bcd`
-- pegged asset `62dce3bd80dc4b0503e7ccbb3fcfa4d7adfd64b4e0cc78fa5e1754b88f1d2da4`
-- P2P domain `ecash-elements-drivechain-p2p-v11`
-- data dir `elements-v11`
+- genesis `a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f`
+- native (pegged) asset `5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8`
+- P2P domain `ecash-elements-drivechain-betanet-slot24-p2p-v1` (magic `3b5ff18b`)
+- data dir `elements-betanet-slot24-v1`
+- parent checkpoint height 967679; address encoding unchanged (`elements` / `elementsl`)
 
-The archived `ecx-alpha` and `ecx-beta` therefore share their identity pins.
-The vault binding key (`<id>-<genesis prefix>`) and the offer `network` field
-(the profile id) still tell them apart.
+Slot 24 has been BMM-mined since about parent height 970890; no deposits yet
+as of 2026-10-03. The only missing pin is a public sidechain Esplora.
 
 ## Schema
 

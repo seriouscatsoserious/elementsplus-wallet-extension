@@ -117,19 +117,20 @@ pub const ECX_ALPHA: NetworkProfile = NetworkProfile {
 };
 
 /// Elements sidechain in slot 24 on eCash betanet (activated at parent height
-/// 970715). The slot-24 proposal bytes equal `PROPOSAL_DESCRIPTION_HEX` in
-/// Elements+ `src/elements_drivechain_identity.h` (master 006d2a30), i.e. the
-/// same v11 identity as the archived alpha chain: same genesis, pegged asset
-/// and address encoding. Pending only because no public sidechain node or
-/// Esplora runs on betanet yet: `esplora_url` is the single missing pin.
+/// 970715). Pins come from Elements+ `doc/betanet-slot24-test.md` and
+/// `src/elements_drivechain_identity.h` (master feb99d8b, 2026-10-02): a child
+/// identity authenticated by the existing slot-24 proposal, with its own
+/// genesis and native asset (not the Alpha chain's). Address encoding is
+/// unchanged. Pending only because no public sidechain Esplora exists yet:
+/// `esplora_url` is the single missing pin.
 pub const ECX_BETA: NetworkProfile = NetworkProfile {
     id: "ecx-beta",
     display_name: "eCash Beta · Elements",
     status: ProfileStatus::Pending,
     kind: ProfileKind::Public,
     sidechain_slot: 24,
-    genesis_hash: Some(alpha::GENESIS_HASH),
-    policy_asset: Some(alpha::POLICY_ASSET),
+    genesis_hash: Some("a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f"),
+    policy_asset: Some("5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8"),
     address: Some(AddressProfile {
         native: &alpha::NATIVE_ADDRESS_PARAMS,
         alias: &AddressParams::ELEMENTS,
@@ -351,10 +352,17 @@ mod tests {
                 assert!(profile.missing_pins().is_empty(), "{}", profile.id);
             }
         }
-        // Betanet slot 24 commits to the v11 identity; only Esplora is missing.
+        // Betanet slot 24 has its own child identity; only Esplora is missing.
         assert_eq!(ECX_BETA.missing_pins(), ["esplora_url"]);
-        assert_eq!(ECX_BETA.genesis_hash, ECX_ALPHA.genesis_hash);
-        assert_eq!(ECX_BETA.policy_asset, ECX_ALPHA.policy_asset);
+        assert_eq!(
+            ECX_BETA.genesis_hash,
+            Some("a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f")
+        );
+        assert_eq!(
+            ECX_BETA.policy_asset,
+            Some("5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8")
+        );
+        assert_ne!(ECX_BETA.genesis_hash, ECX_ALPHA.genesis_hash);
         assert_eq!(ECX_BETA.sidechain_slot, 24);
         assert_eq!(
             ECX_MAINNET.missing_pins(),
@@ -378,8 +386,14 @@ mod tests {
         assert!(PUBLISHED.missing_pins().is_empty());
         PUBLISHED.ensure_selectable().unwrap();
         let pins = PUBLISHED.resolve_pins().unwrap();
-        assert_eq!(pins.genesis_hash.to_string(), alpha::GENESIS_HASH);
-        assert_eq!(pins.network, alpha::lwk_network());
+        assert_eq!(
+            pins.genesis_hash.to_string(),
+            "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f"
+        );
+        assert_eq!(
+            pins.policy_asset.to_string(),
+            "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8"
+        );
     }
 
     #[test]

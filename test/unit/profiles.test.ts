@@ -47,15 +47,16 @@ describe("network profile registry", () => {
         error instanceof NetworkProfileError && /pending/u.test(error.message) && /esploraUrl/u.test(error.message));
       assert.throws(() => toWalletBuildProfile(profile), /pending/u);
     }
-    // Betanet slot 24 commits to the v11 identity; only the sidechain Esplora is missing.
+    // Betanet slot 24 has its own child identity; only the sidechain Esplora is missing.
     assert.deepEqual(missingPins(ECX_BETA_PROFILE), ["esploraUrl"]);
-    assert.equal(ECX_BETA_PROFILE.genesisHash, ECX_ALPHA_ARCHIVED_PROFILE.genesisHash);
-    assert.equal(ECX_BETA_PROFILE.policyAssetId, ECX_ALPHA_ARCHIVED_PROFILE.policyAssetId);
+    assert.equal(ECX_BETA_PROFILE.genesisHash, "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f");
+    assert.equal(ECX_BETA_PROFILE.policyAssetId, "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8");
+    assert.notEqual(ECX_BETA_PROFILE.genesisHash, ECX_ALPHA_ARCHIVED_PROFILE.genesisHash);
     assert.deepEqual(ECX_BETA_PROFILE.address, ECX_ALPHA_ARCHIVED_PROFILE.address);
     // Once JK publishes a sidechain Esplora, filling it and flipping the status is the whole change.
     const published = toWalletBuildProfile({ ...ECX_BETA_PROFILE, status: "live", esploraUrl: "https://esplora.example/api" });
     assert.equal(published.id, "ecx-beta");
-    assert.equal(published.key, "ecx-beta-672af009bd90");
+    assert.equal(published.key, "ecx-beta-a7754ce0debc");
     assert.equal(published.explorerUrl, "https://esplora.example");
     assert.equal(published.bech32Hrp, "elements");
     assert.equal(published.parentGenesisHash, ECX_BETA_PROFILE.l1.genesisHash);
