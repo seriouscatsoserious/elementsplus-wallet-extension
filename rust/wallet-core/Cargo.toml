@@ -20,6 +20,7 @@ regtest = []
 bech32 = "=0.11.0"
 elements = { version = "=0.25.3", features = ["serde"] }
 elements-miniscript = "=0.4.0"
+elementsplus-instant = { path = "../instant" }
 elementsplus-lwk-adapter = { path = "../lwk-adapter" }
 hex = "=0.4.3"
 rand = { version = "=0.8.8", default-features = false, features = ["std", "std_rng"] }
