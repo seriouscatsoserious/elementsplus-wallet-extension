@@ -1,0 +1,89 @@
+// Instant LOCKBOX: holds a user's funds so that, before EXPIRY, every spend
+// carries the operator's promise over the exact spending transaction.
+// Wrapped in a NUMS-internal-key, single-leaf Taproot output: no key path.
+//
+// Cooperative path: owner authorization AND operator promise.
+//   owner ALL    : BIP340 over jet::sig_all_hash()            (whole tx)
+//   owner PAIRED : BIP340 over paired_digest()                (own input + output at
+//                  the same index; SIGHASH_SINGLE|ANYONECANPAY analogue for
+//                  pre-signed, offline maker orders)
+//   promise      : BIP340 by OPERATOR over promise_digest()   (whole tx, index-free)
+// Exit path: owner alone, ALL signature, only once the tx height lock >= EXPIRY.
+// The operator can never move funds: every path needs an OWNER signature.
+type Auth = Either<Signature, Signature>;
+type Cooperative = (Auth, Signature);
+
+fn not(bit: bool) -> bool {
+    <u1>::into(jet::complement_1(<bool>::into(bit)))
+}
+
+fn absent(value: Option<u256>) {
+    match value {
+        Some(_: u256) => panic!(),
+        None => (),
+    }
+}
+
+// Index-independent commitment to everything the txid commits to (and more):
+// tx_hash covers version, lock time, all outpoints/sequences/annexes, all
+// outputs, issuances, proofs and spent UTXOs. scriptSigs are added because
+// tx_hash omits them while the txid does not.
+fn tx_commitment() -> u256 {
+    let ctx: Ctx8 = jet::sha_256_ctx_8_init();
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, jet::tx_hash());
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, jet::input_script_sigs_hash());
+    jet::sha_256_ctx_8_finalize(ctx)
+}
+
+fn promise_digest() -> u256 {
+    let (lockbox_txid, lockbox_vout): Outpoint = jet::current_prev_outpoint();
+    let ctx: Ctx8 = jet::sha_256_ctx_8_init();
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, param::PROMISE_DOMAIN);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, param::GENESIS);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, lockbox_txid);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_4(ctx, lockbox_vout);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, tx_commitment());
+    jet::sha_256_ctx_8_finalize(ctx)
+}
+
+fn paired_digest() -> u256 {
+    let (lockbox_txid, lockbox_vout): Outpoint = jet::current_prev_outpoint();
+    let paired_output: u256 = unwrap(jet::output_hash(jet::current_index()));
+    let ctx: Ctx8 = jet::sha_256_ctx_8_init();
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, param::PAIRED_DOMAIN);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, param::GENESIS);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, lockbox_txid);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_4(ctx, lockbox_vout);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, paired_output);
+    jet::sha_256_ctx_8_finalize(ctx)
+}
+
+fn cooperative(coop: Cooperative) {
+    let (auth, promise): Cooperative = coop;
+    match auth {
+        Left(owner_sig: Signature) => {
+            jet::bip_0340_verify((param::OWNER, jet::sig_all_hash()), owner_sig);
+        },
+        Right(owner_sig: Signature) => {
+            jet::bip_0340_verify((param::OWNER, paired_digest()), owner_sig);
+        },
+    };
+    jet::bip_0340_verify((param::OPERATOR, promise_digest()), promise);
+}
+
+fn main() {
+    assert!(jet::eq_256(jet::genesis_block_hash(), param::GENESIS));
+    assert!(not(jet::eq_256(param::OWNER, param::OPERATOR)));
+    assert!(jet::lt_32(0, param::EXPIRY));
+    assert!(jet::lt_32(param::EXPIRY, 500000000));
+    absent(jet::current_pegin());
+    absent(jet::current_new_issuance_contract());
+    absent(jet::current_reissuance_entropy());
+    match witness::ACTION {
+        Left(coop: Cooperative) => cooperative(coop),
+        Right(owner_sig: Signature) => {
+            jet::check_lock_height(param::EXPIRY);
+            jet::bip_0340_verify((param::OWNER, jet::sig_all_hash()), owner_sig);
+        },
+    }
+}

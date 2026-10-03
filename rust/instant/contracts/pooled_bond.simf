@@ -1,0 +1,104 @@
+// Instant POOLED OPERATOR BOND. One bond output secures every lockbox whose
+// OPERATOR is this key: promises bind (lockbox outpoint, tx commitment), not a
+// bond outpoint, so ANY bond UTXO of this key/script is slashable by ANY
+// equivocation of the key. Several UTXOs may share this script (top-ups).
+// NUMS-internal-key, single-leaf Taproot: no key path.
+//
+// Penalty (anyone, any time while unspent): two operator promises for the SAME
+// lockbox outpoint and DIFFERENT tx commitments. Exactly one input (this bond)
+// and three outputs, all explicit FEE_ASSET:
+//   output 0: reporter, any script. By value conservation it receives
+//             floor(bond / 8) minus the network fee the reporter chooses.
+//   output 1: BURN: scriptPubKey exactly OP_RETURN (0x6a), exactly
+//             bond - floor(bond / 8). Provably unspendable: not recapturable
+//             by a block producer who is (or colludes with) the operator.
+//   output 2: the explicit fee output.
+// Refund: operator signature over sig_all_hash once the height lock reaches
+// REFUND_HEIGHT.
+type Promise = (u256, Signature);
+type Evidence = (Outpoint, Promise, Promise);
+
+fn not(bit: bool) -> bool {
+    <u1>::into(jet::complement_1(<bool>::into(bit)))
+}
+
+fn absent(value: Option<u256>) {
+    match value {
+        Some(_: u256) => panic!(),
+        None => (),
+    }
+}
+
+// Must equal the lockbox's promise_digest() byte for byte.
+fn promise_digest(lockbox: Outpoint, commitment: u256) -> u256 {
+    let (lockbox_txid, lockbox_vout): Outpoint = lockbox;
+    let ctx: Ctx8 = jet::sha_256_ctx_8_init();
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, param::PROMISE_DOMAIN);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, param::GENESIS);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, lockbox_txid);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_4(ctx, lockbox_vout);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, commitment);
+    jet::sha_256_ctx_8_finalize(ctx)
+}
+
+fn verify_promise(lockbox: Outpoint, promise: Promise) {
+    let (commitment, sig): Promise = promise;
+    jet::bip_0340_verify((param::OPERATOR, promise_digest(lockbox, commitment)), sig);
+}
+
+fn explicit_fee_asset(asset: Asset1) {
+    assert!(jet::eq_256(unwrap_right::<(u1, u256)>(asset), param::FEE_ASSET));
+}
+
+fn penalty(evidence: Evidence, bond: u64) {
+    let (lockbox, first, second): Evidence = evidence;
+    let (first_commitment, _): Promise = first;
+    let (second_commitment, _): Promise = second;
+    assert!(not(jet::eq_256(first_commitment, second_commitment)));
+    verify_promise(lockbox, first);
+    verify_promise(lockbox, second);
+
+    assert!(jet::eq_32(jet::num_inputs(), 1));
+    assert!(jet::eq_32(jet::num_outputs(), 3));
+    let reward: u64 = jet::right_shift_64(3, bond);
+    let (borrow, burn): (bool, u64) = jet::subtract_64(bond, reward);
+    assert!(not(borrow));
+
+    let (reporter_asset, reporter_amount): (Asset1, Amount1) = unwrap(jet::output_amount(0));
+    explicit_fee_asset(reporter_asset);
+    let reporter_paid: u64 = unwrap_right::<(u1, u256)>(reporter_amount);
+
+    assert!(jet::eq_256(unwrap(jet::output_script_hash(1)), param::BURN_SCRIPT_HASH));
+    let (burn_asset, burn_amount): (Asset1, Amount1) = unwrap(jet::output_amount(1));
+    explicit_fee_asset(burn_asset);
+    assert!(jet::eq_64(unwrap_right::<(u1, u256)>(burn_amount), burn));
+
+    // Reporter output + fee == reward. (Value conservation already implies
+    // this for a one-input transaction; checked explicitly for clarity.)
+    assert!(unwrap(jet::output_is_fee(2)));
+    let (fee_asset, fee_amount): (Asset1, Amount1) = unwrap(jet::output_amount(2));
+    explicit_fee_asset(fee_asset);
+    let (carry, paid): (bool, u64) = jet::add_64(reporter_paid, unwrap_right::<(u1, u256)>(fee_amount));
+    assert!(not(carry));
+    assert!(jet::eq_64(paid, reward));
+}
+
+fn main() {
+    assert!(jet::eq_256(jet::genesis_block_hash(), param::GENESIS));
+    assert!(jet::lt_32(0, param::REFUND_HEIGHT));
+    assert!(jet::lt_32(param::REFUND_HEIGHT, 500000000));
+    absent(jet::current_pegin());
+    absent(jet::current_new_issuance_contract());
+    absent(jet::current_reissuance_entropy());
+    let (asset, amount): (Asset1, Amount1) = jet::current_amount();
+    explicit_fee_asset(asset);
+    let bond: u64 = unwrap_right::<(u1, u256)>(amount);
+    assert!(jet::lt_64(0, bond));
+    match witness::ACTION {
+        Left(evidence: Evidence) => penalty(evidence, bond),
+        Right(operator_sig: Signature) => {
+            jet::check_lock_height(param::REFUND_HEIGHT);
+            jet::bip_0340_verify((param::OPERATOR, jet::sig_all_hash()), operator_sig);
+        },
+    }
+}

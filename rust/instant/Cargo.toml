@@ -1,0 +1,17 @@
+[package]
+name = "elementsplus-instant"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+license = "MIT"
+description = "Feasibility prototype: Instant lockbox + pooled operator bond Simplicity covenants for the Elements+ DEX"
+
+[dependencies]
+simplicityhl = "=0.7.2"
+serde_json = "=1.0.145"
+serde = { version = "=1.0.228", features = ["derive"] }
+hex = "=0.4.3"
+
+[lints.rust]
+unsafe_code = "forbid"
