@@ -1139,18 +1139,17 @@ fn pending_and_archived_profiles_are_refused_by_constructors() {
         beta.genesis_hash().to_string(),
         "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f"
     );
-    for profile in [&ECX_MAINNET] {
-        let error = WalletCore::for_profile(ALICE, profile).err().unwrap();
-        assert!(
-            matches!(
-                error,
-                WalletError::Network(network::NetworkProfileError::Pending(_))
-            ),
-            "{error}"
-        );
-        assert!(error.to_string().contains("pending"));
-        assert!(decode_offer_for_profile(profile, "{}", "00").is_err());
-    }
+    // Mainnet is still pending: refused until its pins are published.
+    let error = WalletCore::for_profile(ALICE, &ECX_MAINNET).err().unwrap();
+    assert!(
+        matches!(
+            error,
+            WalletError::Network(network::NetworkProfileError::Pending(_))
+        ),
+        "{error}"
+    );
+    assert!(error.to_string().contains("pending"));
+    assert!(decode_offer_for_profile(&ECX_MAINNET, "{}", "00").is_err());
     assert!(matches!(
         WalletCore::for_profile(ALICE, &ECX_ALPHA),
         Err(WalletError::Network(
