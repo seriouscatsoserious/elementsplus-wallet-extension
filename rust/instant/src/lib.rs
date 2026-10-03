@@ -14,6 +14,7 @@ pub mod hash;
 pub mod lockbox;
 pub mod policy;
 pub mod watchtower;
+pub mod wire;
 
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
