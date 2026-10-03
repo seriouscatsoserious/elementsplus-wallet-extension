@@ -1,0 +1,27 @@
+[package]
+name = "instant-operator"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+license = "MIT"
+description = "Instant operator service: staked promise signer for Elements+ lockboxes (SPEC.md §5)"
+
+[dependencies]
+elementsplus-instant = { path = "../../rust/instant" }
+axum = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+getrandom = "0.2"
+hex = "=0.4.3"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
+tower-http = { version = "0.6", features = ["cors", "limit"] }
+ureq = { version = "3.1", features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
