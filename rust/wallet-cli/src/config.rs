@@ -402,7 +402,7 @@ mod tests {
     #[test]
     fn pending_and_archived_profiles_are_refused() {
         let mut config = Config::default();
-        for id in ["ecx-beta", "ecx-mainnet"] {
+        for id in ["ecx-mainnet"] {
             config.set("network", id).unwrap();
             let error = config.profile().unwrap_err().to_string();
             assert!(error.contains("pending"), "{error}");

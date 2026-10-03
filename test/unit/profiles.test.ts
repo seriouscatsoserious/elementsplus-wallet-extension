@@ -38,8 +38,8 @@ describe("network profile registry", () => {
     }
   });
 
-  it("keeps beta and mainnet pending and refuses them", () => {
-    for (const profile of [ECX_BETA_PROFILE, ECX_MAINNET_PROFILE]) {
+  it("keeps mainnet pending and refuses it", () => {
+    for (const profile of [ECX_MAINNET_PROFILE]) {
       assert.equal(profile.status, "pending");
       assert.equal(profile.esploraUrl, null);
       assert.equal(profile.sidechainSlot, 24);
@@ -47,20 +47,23 @@ describe("network profile registry", () => {
         error instanceof NetworkProfileError && /pending/u.test(error.message) && /esploraUrl/u.test(error.message));
       assert.throws(() => toWalletBuildProfile(profile), /pending/u);
     }
-    // Betanet slot 24 has its own child identity; only the sidechain Esplora is missing.
-    assert.deepEqual(missingPins(ECX_BETA_PROFILE), ["esploraUrl"]);
+  });
+
+  it("builds beta from JK's slot-24 child identity and public explorer", () => {
+    assert.equal(ECX_BETA_PROFILE.status, "live");
+    assert.deepEqual(missingPins(ECX_BETA_PROFILE), []);
+    assert.equal(ECX_BETA_PROFILE.esploraUrl, "https://explorer.bitnames.info/api");
     assert.equal(ECX_BETA_PROFILE.genesisHash, "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f");
     assert.equal(ECX_BETA_PROFILE.policyAssetId, "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8");
     assert.notEqual(ECX_BETA_PROFILE.genesisHash, ECX_ALPHA_ARCHIVED_PROFILE.genesisHash);
     assert.deepEqual(ECX_BETA_PROFILE.address, ECX_ALPHA_ARCHIVED_PROFILE.address);
-    // Once JK publishes a sidechain Esplora, filling it and flipping the status is the whole change.
-    const published = toWalletBuildProfile({ ...ECX_BETA_PROFILE, status: "live", esploraUrl: "https://esplora.example/api" });
+    const published = toWalletBuildProfile(ECX_BETA_PROFILE);
     assert.equal(published.id, "ecx-beta");
     assert.equal(published.key, "ecx-beta-a7754ce0debc");
-    assert.equal(published.explorerUrl, "https://esplora.example");
+    assert.equal(published.explorerUrl, "https://explorer.bitnames.info");
     assert.equal(published.bech32Hrp, "elements");
     assert.equal(published.parentGenesisHash, ECX_BETA_PROFILE.l1.genesisHash);
-    assert.throws(() => toWalletBuildProfile({ ...ECX_BETA_PROFILE, status: "live" }), /missing esploraUrl/u);
+    assert.throws(() => toWalletBuildProfile({ ...ECX_BETA_PROFILE, esploraUrl: null }), /missing esploraUrl/u);
     assert.deepEqual(missingPins(ECX_MAINNET_PROFILE), ["genesisHash", "policyAssetId", "esploraUrl", "l1.genesisHash", "address"]);
     assert.equal(ECX_BETA_PROFILE.displayName, "eCash Beta · Elements");
     assert.equal(ECX_MAINNET_PROFILE.displayName, "eCash · Elements");

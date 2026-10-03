@@ -88,20 +88,20 @@ const ECASH_GENESIS = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60
 
 /**
  * Elements sidechain in slot 24 on eCash betanet (activated at parent height
- * 970715; BMM-mined since ~970890). Pending only because no public sidechain
- * Esplora exists yet: `esploraUrl` is the single missing pin.
+ * 970715; BMM-mined since ~970890). Sidechain Esplora announced by JK on
+ * 2026-10-03; it serves this genesis at `/block-height/0`.
  */
 export const ECX_BETA_PROFILE: NetworkProfile = Object.freeze({
   id: "ecx-beta",
   displayName: "eCash Beta · Elements",
-  status: "pending",
+  status: "live",
   kind: "public",
   implementation: "Elements+ (betanet slot-24 test deployment)",
   sidechainSlot: 24,
   genesisHash: BETANET_SLOT24_GENESIS,
   policyAssetId: BETANET_SLOT24_PEGGED_ASSET,
   address: ALPHA_ADDRESS,
-  esploraUrl: null,
+  esploraUrl: "https://explorer.bitnames.info/api",
   l1: Object.freeze({
     networkId: "ecash-beta",
     genesisHash: ECASH_GENESIS,

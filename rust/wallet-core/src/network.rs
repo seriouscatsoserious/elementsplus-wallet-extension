@@ -121,12 +121,11 @@ pub const ECX_ALPHA: NetworkProfile = NetworkProfile {
 /// `src/elements_drivechain_identity.h` (master feb99d8b, 2026-10-02): a child
 /// identity authenticated by the existing slot-24 proposal, with its own
 /// genesis and native asset (not the Alpha chain's). Address encoding is
-/// unchanged. Pending only because no public sidechain Esplora exists yet:
-/// `esplora_url` is the single missing pin.
+/// unchanged. Sidechain Esplora announced by JK on 2026-10-03.
 pub const ECX_BETA: NetworkProfile = NetworkProfile {
     id: "ecx-beta",
     display_name: "eCash Beta · Elements",
-    status: ProfileStatus::Pending,
+    status: ProfileStatus::Live,
     kind: ProfileKind::Public,
     sidechain_slot: 24,
     genesis_hash: Some("a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f"),
@@ -135,7 +134,7 @@ pub const ECX_BETA: NetworkProfile = NetworkProfile {
         native: &alpha::NATIVE_ADDRESS_PARAMS,
         alias: &AddressParams::ELEMENTS,
     }),
-    esplora_url: None,
+    esplora_url: Some("https://explorer.bitnames.info/api"),
     l1: L1Profile {
         network_id: "ecash-beta",
         // Observed from the beta L1 Esplora `/block-height/0` (2026-10-02).
@@ -316,10 +315,7 @@ mod tests {
 
     #[test]
     fn pending_and_archived_profiles_are_refused() {
-        assert_eq!(
-            selectable_profile("ecx-beta").unwrap_err(),
-            NetworkProfileError::Pending("ecx-beta")
-        );
+        assert_eq!(selectable_profile("ecx-beta").unwrap().id, "ecx-beta");
         assert_eq!(
             selectable_profile("ecx-mainnet").unwrap_err(),
             NetworkProfileError::Pending("ecx-mainnet")
@@ -332,7 +328,7 @@ mod tests {
             selectable_profile("liquidv1"),
             Err(NetworkProfileError::Unknown(_))
         ));
-        assert!(ECX_BETA.resolve_pins().is_err());
+        assert!(ECX_BETA.resolve_pins().is_ok());
         assert!(ECX_MAINNET.resolve_pins().is_err());
         assert_eq!(
             selectable_profile("elementsplus-regtest").unwrap().id,
@@ -352,8 +348,12 @@ mod tests {
                 assert!(profile.missing_pins().is_empty(), "{}", profile.id);
             }
         }
-        // Betanet slot 24 has its own child identity; only Esplora is missing.
-        assert_eq!(ECX_BETA.missing_pins(), ["esplora_url"]);
+        // Betanet slot 24: JK's child identity plus his public Esplora.
+        assert!(ECX_BETA.missing_pins().is_empty());
+        assert_eq!(
+            ECX_BETA.esplora_url,
+            Some("https://explorer.bitnames.info/api")
+        );
         assert_eq!(
             ECX_BETA.genesis_hash,
             Some("a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f")
@@ -377,15 +377,9 @@ mod tests {
     }
 
     #[test]
-    fn beta_resolves_once_its_esplora_is_published() {
-        static PUBLISHED: NetworkProfile = NetworkProfile {
-            status: ProfileStatus::Live,
-            esplora_url: Some("https://esplora.example/api"),
-            ..ECX_BETA
-        };
-        assert!(PUBLISHED.missing_pins().is_empty());
-        PUBLISHED.ensure_selectable().unwrap();
-        let pins = PUBLISHED.resolve_pins().unwrap();
+    fn beta_resolves_to_the_slot24_child_identity() {
+        ECX_BETA.ensure_selectable().unwrap();
+        let pins = ECX_BETA.resolve_pins().unwrap();
         assert_eq!(
             pins.genesis_hash.to_string(),
             "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f"

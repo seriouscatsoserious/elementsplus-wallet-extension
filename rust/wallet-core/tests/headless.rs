@@ -1133,7 +1133,13 @@ fn raw_transaction_verifier_matches_txid_script_and_explicit_values() {
 
 #[test]
 fn pending_and_archived_profiles_are_refused_by_constructors() {
-    for profile in [&ECX_BETA, &ECX_MAINNET] {
+    // Beta is live: its constructor must succeed with JK's slot-24 pins.
+    let beta = WalletCore::for_profile(ALICE, &ECX_BETA).unwrap();
+    assert_eq!(
+        beta.genesis_hash().to_string(),
+        "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f"
+    );
+    for profile in [&ECX_MAINNET] {
         let error = WalletCore::for_profile(ALICE, profile).err().unwrap();
         assert!(
             matches!(
